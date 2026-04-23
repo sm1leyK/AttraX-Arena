@@ -82,97 +82,112 @@ If `is_ai_agent = true`, frontend should show:
 
 ### Fixed homepage modules
 
-- [ ] Main feed
-- [ ] Hot posts ranking
-- [ ] Active actor ranking
+- [x] Main feed
+- [x] Hot posts ranking
+- [x] Active actor ranking
 - [ ] Weekly chaos ranking or odds block
 - [ ] Agent activity block
 
 ### Module-to-view mapping
 
-- [ ] Main feed -> `feed_posts`
-- [ ] Post detail comments -> `feed_comments`
-- [ ] Hot posts ranking -> `hot_posts_rankings`
-- [ ] Active actor ranking -> `active_actor_rankings`
-- [ ] Weekly chaos ranking -> `weekly_chaos_rankings`
+- [x] Main feed -> `feed_posts`
+- [x] Post detail comments -> `feed_comments`
+- [x] Hot posts ranking -> `hot_posts_rankings`
+- [x] Active actor ranking -> `active_actor_rankings`
+- [x] Weekly chaos ranking -> `weekly_chaos_rankings`
+
+Backend note:
+
+- The backend already exposes these five views in `schema.sql`.
+- A dedicated odds-card view is not in `main` yet. If the team wants a homepage odds block, use seeded prediction values from `feed_posts` for now or merge the prediction-card PR first.
 
 ### Frontend minimum field confirmation
 
 #### Feed card
 
-- [ ] `id`
-- [ ] `title`
-- [ ] `content`
-- [ ] `image_url`
-- [ ] `category`
-- [ ] `author_name`
-- [ ] `author_avatar_url`
-- [ ] `author_badge`
-- [ ] `author_disclosure`
-- [ ] `is_ai_agent`
-- [ ] `like_count`
-- [ ] `comment_count`
-- [ ] `created_at`
+- [x] `id`
+- [x] `title`
+- [x] `content`
+- [x] `image_url`
+- [x] `category`
+- [x] `author_name`
+- [x] `author_avatar_url`
+- [x] `author_badge`
+- [x] `author_disclosure`
+- [x] `is_ai_agent`
+- [x] `like_count`
+- [x] `comment_count`
+- [x] `created_at`
 
 #### Hot ranking card
 
-- [ ] `post_id`
-- [ ] `title`
-- [ ] `author_name`
-- [ ] `author_badge`
-- [ ] `is_ai_agent`
-- [ ] `hot_score`
-- [ ] `rank_position`
+- [x] `post_id`
+- [x] `title`
+- [x] `author_name`
+- [x] `author_badge`
+- [x] `is_ai_agent`
+- [x] `hot_score`
+- [x] `rank_position`
 
 #### Active actor card
 
-- [ ] `actor_kind`
-- [ ] `actor_id`
-- [ ] `actor_name`
-- [ ] `actor_avatar_url`
-- [ ] `actor_badge`
-- [ ] `activity_score`
-- [ ] `rank_position`
+- [x] `actor_kind`
+- [x] `actor_id`
+- [x] `actor_name`
+- [x] `actor_avatar_url`
+- [x] `actor_badge`
+- [x] `activity_score`
+- [x] `rank_position`
+
+Backend note:
+
+- `active_actor_rankings` in current `main` does not yet include `actor_handle`, `actor_disclosure`, or `is_ai_agent`.
+- If frontend needs those fields, merge PR `#1 feat: complete backend B-role handoff package` or add an equivalent schema change.
 
 #### Weekly chaos card
 
-- [ ] `post_id`
-- [ ] `title`
-- [ ] `author_name`
-- [ ] `author_badge`
-- [ ] `is_ai_agent`
-- [ ] `chaos_score`
-- [ ] `rank_position`
+- [x] `post_id`
+- [x] `title`
+- [x] `author_name`
+- [x] `author_badge`
+- [x] `is_ai_agent`
+- [x] `chaos_score`
+- [x] `rank_position`
 
 ## 6. Write Flow Alignment Board
 
 ### Post creation
 
-- [ ] Frontend writes `posts`
-- [ ] Human post uses `author_kind = 'human'`
-- [ ] Human post sends `author_profile_id = auth.uid()`
+- [x] Frontend writes `posts`
+- [x] Human post uses `author_kind = 'human'`
+- [x] Human post sends `author_profile_id = auth.uid()`
 - [ ] Agent post path is either enabled or deferred
-- [ ] `title` and `content` are treated as required
+- [x] `title` and `content` are treated as required
 
 ### Comment creation
 
-- [ ] Frontend writes `comments`
-- [ ] Human comment uses `author_kind = 'human'`
-- [ ] Human comment sends `author_profile_id = auth.uid()`
-- [ ] `post_id` and `content` are treated as required
+- [x] Frontend writes `comments`
+- [x] Human comment uses `author_kind = 'human'`
+- [x] Human comment sends `author_profile_id = auth.uid()`
+- [x] `post_id` and `content` are treated as required
 
 ### Like creation
 
-- [ ] Frontend writes `likes`
-- [ ] Human like uses `actor_kind = 'human'`
-- [ ] Human like sends `actor_profile_id = auth.uid()`
+- [x] Frontend writes `likes`
+- [x] Human like uses `actor_kind = 'human'`
+- [x] Human like sends `actor_profile_id = auth.uid()`
 - [ ] Duplicate-like behavior is handled in UI
 
 ### Image upload
 
-- [ ] Frontend uploads to `arena-assets`
-- [ ] Path matches backend policy
-- [ ] Post row stores the returned public URL
+- [x] Frontend uploads to `arena-assets`
+- [x] Path matches backend policy
+- [x] Post row stores the returned public URL
+
+Backend note:
+
+- Storage policy expects the first folder segment to equal `auth.uid()`.
+- Recommended frontend path remains `{auth.uid()}/{timestamp}-{filename}`.
 
 ## 7. Human vs Agent UI Board
 
@@ -189,11 +204,16 @@ Notes:
 
 ## 8. Backend Agent Tasks
 
-- [ ] Confirm views still match frontend needs
+- [x] Confirm views still match current MVP homepage needs
 - [ ] Confirm RLS still permits intended user actions
-- [ ] Confirm seed data is enough for homepage rendering
-- [ ] Add missing fields only if they remove a real frontend blocker
-- [ ] Record every contract-affecting change below
+- [x] Confirm seed data is enough for homepage rendering
+- [x] Add missing fields only if they remove a real frontend blocker
+- [x] Record every contract-affecting change below
+
+Backend note:
+
+- RLS is defined in `schema.sql`, but this board does not treat it as runtime-verified until it is exercised in the real Supabase project.
+- Seed data is sufficient for feed, hot ranking, active ranking, and weekly chaos ranking demos.
 
 ## 9. Frontend Agent Tasks
 
@@ -215,12 +235,16 @@ Examples:
 
 - `2026-04-23 | frontend-agent | homepage-feed | Need excerpt length rule for long content`
 - `2026-04-23 | backend-agent | rankings | Can add actor_handle if UI wants compact labels`
+- `2026-04-23 | backend-agent | homepage-odds | Dedicated odds-card view is not in main yet. Decide whether homepage uses seeded `feed_posts` prediction fields for now or merges PR #1 first.`
+- `2026-04-23 | backend-agent | active-ranking | Current main exposes actor_name and actor_badge, but not actor_disclosure or actor_handle. Frontend should confirm whether current fields are enough.`
+- `2026-04-23 | backend-agent | agent-posting | Human posting path is fully defined. Agent posting UI path still needs an explicit product decision.`
 
 - ``
 
 ## 11. Change Log
 
 - `2026-04-23 | codex | created initial agent-to-agent alignment board`
+- `2026-04-23 | codex | filled backend-confirmed checklist items and added current backend constraints`
 
 ## 12. Done Standard
 
