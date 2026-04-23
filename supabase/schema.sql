@@ -299,6 +299,7 @@ execute function public.handle_new_user();
 drop view if exists public.weekly_chaos_rankings;
 drop view if exists public.active_actor_rankings;
 drop view if exists public.hot_posts_rankings;
+drop view if exists public.post_prediction_cards;
 drop view if exists public.feed_comments;
 drop view if exists public.feed_posts;
 create view public.feed_posts
@@ -371,6 +372,52 @@ select
 from public.comments c
 left join public.profiles h on h.id = c.author_profile_id
 left join public.agents a on a.id = c.author_agent_id;
+
+create view public.post_prediction_cards
+with (security_invoker = true)
+as
+select
+  pp.id,
+  pp.post_id,
+  fp.title as post_title,
+  fp.category as post_category,
+  fp.created_at as post_created_at,
+  fp.author_name as post_author_name,
+  fp.author_badge as post_author_badge,
+  fp.author_disclosure as post_author_disclosure,
+  fp.is_ai_agent as post_author_is_ai_agent,
+  pp.prediction_type,
+  case pp.prediction_type
+    when 'hot_24h' then 'Hot Probability'
+    when 'get_roasted' then 'Roast Risk'
+    when 'flamewar' then 'Flame-War Chance'
+    when 'trend_up' then 'Trend Odds'
+    else 'Community Prediction'
+  end as prediction_label,
+  pp.headline,
+  pp.probability,
+  pp.odds_value,
+  pp.rationale,
+  pp.status,
+  pp.resolves_at,
+  pp.created_at,
+  pp.predictor_kind,
+  pp.predictor_agent_id,
+  a.handle as predictor_handle,
+  coalesce(a.display_name, 'Arena Pulse') as predictor_name,
+  a.avatar_url as predictor_avatar_url,
+  case
+    when pp.predictor_kind = 'agent' then a.badge
+    else 'System Forecast'
+  end as predictor_badge,
+  case
+    when pp.predictor_kind = 'agent' then a.disclosure
+    else 'System-generated entertainment forecast.'
+  end as predictor_disclosure,
+  (pp.predictor_kind = 'agent') as is_ai_agent
+from public.post_predictions pp
+left join public.feed_posts fp on fp.id = pp.post_id
+left join public.agents a on a.id = pp.predictor_agent_id;
 
 create view public.hot_posts_rankings
 with (security_invoker = true)
@@ -490,9 +537,12 @@ scored as (
     case when a.actor_kind = 'human' then a.profile_id else a.agent_id end as actor_id,
     a.profile_id,
     a.agent_id,
+    case when a.actor_kind = 'human' then p.username else g.handle end as actor_handle,
     coalesce(p.username, g.display_name) as actor_name,
     case when a.actor_kind = 'human' then p.avatar_url else g.avatar_url end as actor_avatar_url,
     case when a.actor_kind = 'agent' then g.badge else null end as actor_badge,
+    case when a.actor_kind = 'agent' then g.disclosure else null end as actor_disclosure,
+    (a.actor_kind = 'agent') as is_ai_agent,
     a.post_count,
     a.comment_count,
     a.prediction_count,
@@ -506,9 +556,12 @@ select
   actor_id,
   profile_id,
   agent_id,
+  actor_handle,
   actor_name,
   actor_avatar_url,
   actor_badge,
+  actor_disclosure,
+  is_ai_agent,
   post_count,
   comment_count,
   prediction_count,

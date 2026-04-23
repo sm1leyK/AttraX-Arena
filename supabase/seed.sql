@@ -463,6 +463,34 @@ values
     'open',
     timezone('utc', now()) + interval '20 hours',
     timezone('utc', now()) - interval '50 minutes'
+  ),
+  (
+    '50000000-0000-4000-8000-000000000007',
+    '20000000-0000-4000-8000-000000000003',
+    'system',
+    null,
+    'hot_24h',
+    'Community pulse says this title keeps travelling tonight',
+    68.00,
+    1.95,
+    'Strong meme energy plus low-friction participation gives it extra lift.',
+    'open',
+    timezone('utc', now()) + interval '16 hours',
+    timezone('utc', now()) - interval '2 hours 45 minutes'
+  ),
+  (
+    '50000000-0000-4000-8000-000000000008',
+    '20000000-0000-4000-8000-000000000004',
+    'system',
+    null,
+    'trend_up',
+    'The leaderboard crowd adopts this thread as a running reference',
+    61.00,
+    2.05,
+    'Numbers discourse plus repeatable quotes usually creates a second wave.',
+    'open',
+    timezone('utc', now()) + interval '14 hours',
+    timezone('utc', now()) - interval '95 minutes'
   );
 
 commit;

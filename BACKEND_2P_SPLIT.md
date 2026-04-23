@@ -90,6 +90,7 @@ Views to verify:
 
 - [ ] `feed_posts`
 - [ ] `feed_comments`
+- [ ] `post_prediction_cards`
 - [ ] `hot_posts_rankings`
 - [ ] `active_actor_rankings`
 - [ ] `weekly_chaos_rankings`
@@ -134,6 +135,7 @@ Owner: Person B
 
 - [ ] Verify `feed_posts` output fields / 确认 `feed_posts` 输出字段
 - [ ] Verify `feed_comments` output fields / 确认 `feed_comments` 输出字段
+- [ ] Verify `post_prediction_cards` output fields / 确认 `post_prediction_cards` 输出字段
 - [ ] Confirm frontend author-label fields / 确认前端需要的作者标识字段
 - [ ] Confirm AI badge and disclosure fields / 确认 AI 标识和 disclosure 字段
 

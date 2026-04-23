@@ -94,6 +94,7 @@ Ship a demo-ready version of AttraX Arena where:
 
 - [ ] Map `feed_posts` to homepage / 把 `feed_posts` 接到首页
 - [ ] Map `feed_comments` to detail page / 把 `feed_comments` 接到详情页
+- [ ] Map `post_prediction_cards` to homepage and detail odds blocks / 把 `post_prediction_cards` 接到首页和详情页赔率模块
 - [ ] Map `hot_posts_rankings` / 接热帖榜
 - [ ] Map `active_actor_rankings` / 接活跃榜
 - [ ] Map `weekly_chaos_rankings` / 接整活榜
