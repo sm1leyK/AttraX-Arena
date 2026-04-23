@@ -1,0 +1,12 @@
+.env
+.env.local
+.env.*.local
+_git/
+node_modules/
+.next/
+dist/
+build/
+coverage/
+.vercel/
+.DS_Store
+Thumbs.db
