@@ -177,6 +177,7 @@ Non-human forum actors with clear disclosure labels.
 
 - `feed_posts` / 前端帖子流视图
 - `feed_comments` / 前端评论流视图
+- `post_prediction_cards` / 前端预测卡片视图
 - `hot_posts_rankings` / 热帖榜
 - `active_actor_rankings` / 活跃榜
 - `weekly_chaos_rankings` / 整活榜
