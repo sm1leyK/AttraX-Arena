@@ -1,36 +1,45 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 
 const schemaSql = readFileSync(new URL("./schema.sql", import.meta.url), "utf8");
+const migrationFileNames = readdirSync(new URL("./migrations/", import.meta.url))
+  .filter((fileName) => fileName.endsWith(".sql"));
 const postImageMigrationSql = readFileSync(
-  new URL("./migrations/20260425_normalize_post_image_url.sql", import.meta.url),
+  new URL("./migrations/20260425000300_normalize_post_image_url.sql", import.meta.url),
   "utf8",
 );
 const supportTrendMigrationSql = readFileSync(
-  new URL("./migrations/20260425_support_board_trend_rpc.sql", import.meta.url),
+  new URL("./migrations/20260425000600_support_board_trend_rpc.sql", import.meta.url),
   "utf8",
 );
 const projectDeadlineMigrationSql = readFileSync(
-  new URL("./migrations/20260425_project_submission_deadline_rpc.sql", import.meta.url),
+  new URL("./migrations/20260425000500_project_submission_deadline_rpc.sql", import.meta.url),
   "utf8",
 );
 const featureFlagsMigrationSql = readFileSync(
-  new URL("./migrations/20260425_app_feature_flags.sql", import.meta.url),
+  new URL("./migrations/20260425000100_app_feature_flags.sql", import.meta.url),
   "utf8",
 );
 const cookieConsentMigrationSql = readFileSync(
-  new URL("./migrations/20260425_user_cookie_consents.sql", import.meta.url),
+  new URL("./migrations/20260425000700_user_cookie_consents.sql", import.meta.url),
   "utf8",
 );
 const postActionsMigrationSql = readFileSync(
-  new URL("./migrations/20260425_post_share_and_delete_actions.sql", import.meta.url),
+  new URL("./migrations/20260425000400_post_share_and_delete_actions.sql", import.meta.url),
   "utf8",
 );
 const ownPostMarketMigrationSql = readFileSync(
-  new URL("./migrations/20260425_block_own_post_market_bets.sql", import.meta.url),
+  new URL("./migrations/20260425000200_block_own_post_market_bets.sql", import.meta.url),
   "utf8",
 );
+
+test("migration files use unique Supabase versions", () => {
+  const versions = migrationFileNames.map((fileName) => fileName.split("_", 1)[0]);
+  const duplicateVersions = versions.filter((version, index) => versions.indexOf(version) !== index);
+
+  assert.deepEqual(duplicateVersions, []);
+});
 
 function extractSqlFunction(functionName) {
   const match = schemaSql.match(
@@ -304,8 +313,7 @@ test("post image normalization migration can be applied to live Supabase", () =>
   assert.match(postImageMigrationSql, /create or replace function public\.normalize_post_image_fields/);
   assert.match(postImageMigrationSql, /create trigger normalize_post_image_fields/);
   assert.match(postImageMigrationSql, /update public\.posts[\s\S]*set image_url = public\.normalize_post_image_url\(image_url\)/i);
-  assert.match(postImageMigrationSql, /create or replace view public\.feed_posts/);
-  assert.match(postImageMigrationSql, /public\.normalize_post_image_url\(p\.image_url\) as image_url/i);
+  assert.doesNotMatch(postImageMigrationSql, /create or replace view public\.feed_posts/i);
 });
 
 test("agent search fallback string is valid SQL text", () => {
