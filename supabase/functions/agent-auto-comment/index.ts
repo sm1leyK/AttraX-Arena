@@ -9,11 +9,12 @@ type RuntimeConfig = {
 };
 
 type AgentAutoCommentPayload = {
-  postId: string;
+  postId?: string;
   agentId?: string;
   agentHandle?: string;
   mode: "single" | "roundtable";
   maxComments: number;
+  maxPosts: number;
   dryRun: boolean;
   allowRepeat: boolean;
 };
@@ -35,6 +36,8 @@ type FeedPostRow = {
   title: string;
   content: string;
   category: string | null;
+  author_kind: "human" | "agent";
+  author_agent_id: string | null;
   author_name: string | null;
   author_badge: string | null;
   is_ai_agent: boolean;
@@ -66,11 +69,21 @@ type InsertedCommentRow = {
 };
 
 type GeneratedComment = {
+  post_id: string;
+  post_title: string;
   agent_id: string;
   agent_handle: string;
   agent_name: string;
   content: string;
   inserted_comment_id: string | null;
+};
+
+type CandidatePost = {
+  post: FeedPostRow;
+  recentComments: FeedCommentRow[];
+  score: number;
+  recentHumanCommentCount: number;
+  recentAgentCommentCount: number;
 };
 
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
@@ -81,7 +94,7 @@ const RECENT_COMMENT_LIMIT = 8;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const HANDLE_RE = /^[a-z0-9][a-z0-9-]{2,23}$/;
 const FORBIDDEN_COMMENT_LANGUAGE_RE =
-  /\b(real[-\s]?money|wallet|deposit|withdraw(?:al)?|payment|gambl(?:e|ing)|wager|betting|bet)\b|真钱|真金白银|钱包|充值|提现|支付|赌博|博彩|下注|押注|赌局|赌注/i;
+  /\b(real[-\s]?money|wallet|deposit|withdraw(?:al)?|payment|gambl(?:e|ing)|wager|betting|bet)\b|\u771f\u94b1|\u771f\u91d1\u767d\u94f6|\u94b1\u5305|\u5145\u503c|\u63d0\u73b0|\u652f\u4ed8|\u8d4c\u535a|\u535a\u5f69|\u4e0b\u6ce8|\u62bc\u6ce8|\u8d4c\u5c40|\u8d4c\u6ce8/i;
 
 const jsonHeaders = {
   "Content-Type": "application/json; charset=utf-8",
@@ -119,48 +132,12 @@ Deno.serve(async (request: Request) => {
     const config = readRuntimeConfig(agentRunnerSecret);
 
     const payload = parsePayload(await readJsonBody(request));
-    const post = await loadPost(config, payload.postId);
-    const recentComments = await loadRecentComments(config, payload.postId);
-    const existingAgentIds = payload.allowRepeat
-      ? new Set<string>()
-      : await loadExistingAgentCommentIds(config, payload.postId);
-    const agents = await resolveAgents(config, payload, existingAgentIds);
+    const agentPool = await loadRequestedAgents(config, payload);
+    const result = payload.postId
+      ? await runForSpecificPost(config, payload, agentPool)
+      : await runAutonomousCommunityPass(config, payload, agentPool);
 
-    const comments: GeneratedComment[] = [];
-
-    for (const agent of agents) {
-      const rawComment = await generateAgentComment(config, agent, post, recentComments);
-      const content = normalizeGeneratedComment(rawComment);
-      let inserted: InsertedCommentRow | null = null;
-
-      if (!payload.dryRun) {
-        inserted = await insertAgentComment(config, payload.postId, agent.id, content);
-      }
-
-      comments.push({
-        agent_id: agent.id,
-        agent_handle: agent.handle,
-        agent_name: agent.display_name,
-        content,
-        inserted_comment_id: inserted?.id ?? null,
-      });
-
-      recentComments.unshift({
-        author_name: agent.display_name,
-        author_badge: agent.badge,
-        is_ai_agent: true,
-        content,
-        created_at: inserted?.created_at ?? new Date().toISOString(),
-      });
-    }
-
-    return jsonResponse({
-      ok: true,
-      dry_run: payload.dryRun,
-      post_id: payload.postId,
-      model: config.agentModel,
-      comments,
-    }, payload.dryRun ? 200 : 201);
+    return jsonResponse(result, payload.dryRun ? 200 : 201);
   } catch (error) {
     if (error instanceof HttpError) {
       return jsonResponse({
@@ -245,8 +222,8 @@ function parsePayload(input: unknown): AgentAutoCommentPayload {
     throw new HttpError(400, "invalid_body", "Request body must be a JSON object.");
   }
 
-  const postId = readRequiredString(input, "post_id");
-  if (!UUID_RE.test(postId)) {
+  const postId = readOptionalString(input, "post_id");
+  if (postId && !UUID_RE.test(postId)) {
     throw new HttpError(400, "invalid_post_id", "post_id must be a UUID.");
   }
 
@@ -270,15 +247,19 @@ function parsePayload(input: unknown): AgentAutoCommentPayload {
     throw new HttpError(400, "invalid_mode", "mode must be single or roundtable.");
   }
 
-  const defaultMaxComments = modeValue === "roundtable" && !agentId && !agentHandle ? 2 : 1;
+  const defaultMaxComments = postId
+    ? modeValue === "roundtable" && !agentId && !agentHandle ? 2 : 1
+    : 2;
   const maxComments = clampInt(readOptionalNumber(input, "max_comments") ?? defaultMaxComments, 1, MAX_AGENT_COMMENTS_PER_RUN);
+  const maxPosts = clampInt(readOptionalNumber(input, "max_posts") ?? 6, 1, 10);
 
   return {
     postId,
     agentId,
     agentHandle,
     mode: modeValue,
-    maxComments: agentId || agentHandle ? 1 : maxComments,
+    maxComments: postId && (agentId || agentHandle) ? 1 : maxComments,
+    maxPosts,
     dryRun: input.dry_run === true,
     allowRepeat: input.allow_repeat === true,
   };
@@ -292,6 +273,8 @@ async function loadPost(config: RuntimeConfig, postId: string): Promise<FeedPost
       "title",
       "content",
       "category",
+      "author_kind",
+      "author_agent_id",
       "author_name",
       "author_badge",
       "is_ai_agent",
@@ -330,57 +313,290 @@ async function loadExistingAgentCommentIds(config: RuntimeConfig, postId: string
   return new Set(rows.map((row) => row.author_agent_id).filter(Boolean) as string[]);
 }
 
-async function resolveAgents(
+async function loadRequestedAgents(
   config: RuntimeConfig,
   payload: AgentAutoCommentPayload,
-  existingAgentIds: Set<string>,
 ): Promise<AgentRow[]> {
   const select = "id,handle,display_name,persona,bio,badge,disclosure,kind,is_active";
-  let rows: AgentRow[];
 
   if (payload.agentId) {
-    rows = await supabaseGet<AgentRow>(config, "agents", {
+    const rows = await supabaseGet<AgentRow>(config, "agents", {
       id: `eq.${payload.agentId}`,
       kind: "eq.official",
       is_active: "eq.true",
       select,
       limit: "1",
     });
+
+    if (rows.length === 0) {
+      throw new HttpError(404, "agent_not_found", "No active official agent matched the request.");
+    }
+
+    return rows;
   } else if (payload.agentHandle) {
-    rows = await supabaseGet<AgentRow>(config, "agents", {
+    const rows = await supabaseGet<AgentRow>(config, "agents", {
       handle: `eq.${payload.agentHandle}`,
       kind: "eq.official",
       is_active: "eq.true",
       select,
       limit: "1",
     });
-  } else {
-    rows = await supabaseGet<AgentRow>(config, "agents", {
-      kind: "eq.official",
-      is_active: "eq.true",
-      select,
-      order: "handle.asc",
+
+    if (rows.length === 0) {
+      throw new HttpError(404, "agent_not_found", "No active official agent matched the request.");
+    }
+
+    return rows;
+  }
+
+  const rows = await supabaseGet<AgentRow>(config, "agents", {
+    kind: "eq.official",
+    is_active: "eq.true",
+    select,
+    order: "handle.asc",
+  });
+
+  if (rows.length === 0) {
+    throw new HttpError(404, "agent_not_found", "No active official agents are available.");
+  }
+
+  return rows;
+}
+
+function selectAgentsForPost(
+  agentPool: AgentRow[],
+  existingAgentIds: Set<string>,
+  postId: string,
+  maxCount: number,
+  blockedAgentIds = new Set<string>(),
+): AgentRow[] {
+  const availableAgents = agentPool.filter((agent) => !existingAgentIds.has(agent.id) && !blockedAgentIds.has(agent.id));
+
+  if (availableAgents.length === 0 || maxCount <= 0) {
+    return [];
+  }
+
+  const rotated = rotateByStableHash(availableAgents, postId);
+
+  return rotated.slice(0, Math.min(maxCount, MAX_AGENT_COMMENTS_PER_RUN));
+}
+
+async function runForSpecificPost(
+  config: RuntimeConfig,
+  payload: AgentAutoCommentPayload,
+  agentPool: AgentRow[],
+): Promise<JsonRecord> {
+  if (!payload.postId) {
+    throw new HttpError(400, "missing_field", "post_id is required for specific post runs.");
+  }
+
+  const post = await loadPost(config, payload.postId);
+  const recentComments = await loadRecentComments(config, payload.postId);
+  const comments = await createAgentCommentsForPost(
+    config,
+    payload,
+    agentPool,
+    post,
+    recentComments,
+    payload.maxComments,
+    true,
+  );
+
+  return {
+    ok: true,
+    dry_run: payload.dryRun,
+    run_mode: "post",
+    post_id: payload.postId,
+    model: config.agentModel,
+    comments,
+  };
+}
+
+async function runAutonomousCommunityPass(
+  config: RuntimeConfig,
+  payload: AgentAutoCommentPayload,
+  agentPool: AgentRow[],
+): Promise<JsonRecord> {
+  const candidates = await loadAutonomousPostCandidates(config, payload.maxPosts);
+  const comments: GeneratedComment[] = [];
+  const visitedPosts: JsonRecord[] = [];
+
+  for (const candidate of candidates) {
+    if (comments.length >= payload.maxComments) {
+      break;
+    }
+
+    const remaining = payload.maxComments - comments.length;
+    const maxForPost = payload.mode === "roundtable" && agentPool.length > 1
+      ? Math.min(2, remaining)
+      : 1;
+    const generated = await createAgentCommentsForPost(
+      config,
+      payload,
+      agentPool,
+      candidate.post,
+      candidate.recentComments,
+      maxForPost,
+      false,
+    );
+
+    visitedPosts.push({
+      post_id: candidate.post.id,
+      title: candidate.post.title,
+      author_kind: candidate.post.author_kind,
+      score: candidate.score,
+      recent_human_comments: candidate.recentHumanCommentCount,
+      recent_agent_comments: candidate.recentAgentCommentCount,
+      generated_comments: generated.length,
+    });
+
+    comments.push(...generated);
+  }
+
+  if (comments.length === 0) {
+    throw new HttpError(409, "no_autonomous_targets", "No eligible post and official Agent pairing was available for this autonomous run.", {
+      posts_considered: visitedPosts,
     });
   }
 
-  if (rows.length === 0) {
-    throw new HttpError(404, "agent_not_found", "No active official agent matched the request.");
+  return {
+    ok: true,
+    dry_run: payload.dryRun,
+    run_mode: "autonomous",
+    model: config.agentModel,
+    max_posts: payload.maxPosts,
+    comments,
+    posts_considered: visitedPosts,
+  };
+}
+
+async function createAgentCommentsForPost(
+  config: RuntimeConfig,
+  payload: AgentAutoCommentPayload,
+  agentPool: AgentRow[],
+  post: FeedPostRow,
+  recentComments: FeedCommentRow[],
+  maxForPost: number,
+  failWhenNoAgent: boolean,
+): Promise<GeneratedComment[]> {
+  const existingAgentIds = payload.allowRepeat
+    ? new Set<string>()
+    : await loadExistingAgentCommentIds(config, post.id);
+  const blockedAgentIds = post.author_agent_id ? new Set([post.author_agent_id]) : new Set<string>();
+  const selectedAgents = selectAgentsForPost(agentPool, existingAgentIds, post.id, maxForPost, blockedAgentIds);
+
+  if (selectedAgents.length === 0) {
+    if (failWhenNoAgent) {
+      throw new HttpError(409, "agent_already_commented", "Selected agent(s) have already commented on this post.");
+    }
+
+    return [];
   }
 
-  const availableAgents = rows.filter((agent) => !existingAgentIds.has(agent.id));
+  const comments: GeneratedComment[] = [];
 
-  if (availableAgents.length === 0) {
-    throw new HttpError(409, "agent_already_commented", "Selected agent(s) have already commented on this post.");
+  for (const agent of selectedAgents) {
+    const rawComment = await generateAgentComment(config, agent, post, recentComments);
+    const content = normalizeGeneratedComment(rawComment);
+    let inserted: InsertedCommentRow | null = null;
+
+    if (!payload.dryRun) {
+      inserted = await insertAgentComment(config, post.id, agent.id, content);
+    }
+
+    comments.push({
+      post_id: post.id,
+      post_title: post.title,
+      agent_id: agent.id,
+      agent_handle: agent.handle,
+      agent_name: agent.display_name,
+      content,
+      inserted_comment_id: inserted?.id ?? null,
+    });
+
+    recentComments.unshift({
+      author_name: agent.display_name,
+      author_badge: agent.badge,
+      is_ai_agent: true,
+      content,
+      created_at: inserted?.created_at ?? new Date().toISOString(),
+    });
   }
 
-  if (payload.agentId || payload.agentHandle) {
-    return [availableAgents[0]];
+  return comments;
+}
+
+async function loadAutonomousPostCandidates(
+  config: RuntimeConfig,
+  maxPosts: number,
+): Promise<CandidatePost[]> {
+  const candidateLimit = Math.max(maxPosts * 4, 12);
+  const posts = await supabaseGet<FeedPostRow>(config, "feed_posts", {
+    select: [
+      "id",
+      "title",
+      "content",
+      "category",
+      "author_kind",
+      "author_agent_id",
+      "author_name",
+      "author_badge",
+      "is_ai_agent",
+      "like_count",
+      "comment_count",
+      "hot_probability",
+      "flamewar_probability",
+      "created_at",
+    ].join(","),
+    order: "created_at.desc",
+    limit: String(candidateLimit),
+  });
+
+  if (posts.length === 0) {
+    throw new HttpError(404, "no_posts", "No feed posts are available for autonomous Agent activity.");
   }
 
-  const rotated = rotateByStableHash(availableAgents, payload.postId);
-  const count = payload.mode === "roundtable" ? payload.maxComments : 1;
+  const candidates: CandidatePost[] = [];
 
-  return rotated.slice(0, count);
+  for (const post of posts) {
+    const recentComments = await loadRecentComments(config, post.id);
+    const recentHumanCommentCount = recentComments.filter((comment) => !comment.is_ai_agent).length;
+    const recentAgentCommentCount = recentComments.filter((comment) => comment.is_ai_agent).length;
+    const crossActorBonus =
+      (post.author_kind === "human" && recentAgentCommentCount > 0)
+      || (post.author_kind === "agent" && recentHumanCommentCount > 0)
+        ? 12
+        : 0;
+    const humanInteractionBonus = post.author_kind === "human" || recentHumanCommentCount > 0 ? 8 : 0;
+    const agentInteractionBonus = post.author_kind === "agent" || recentAgentCommentCount > 0 ? 6 : 0;
+    const freshPostBonus = post.comment_count === 0 ? 3 : 0;
+    const score = Number((
+      post.comment_count * 2
+      + post.like_count
+      + post.hot_probability / 12
+      + post.flamewar_probability / 15
+      + recentHumanCommentCount * 4
+      + recentAgentCommentCount * 2
+      + crossActorBonus
+      + humanInteractionBonus
+      + agentInteractionBonus
+      + freshPostBonus
+    ).toFixed(2));
+
+    candidates.push({
+      post,
+      recentComments,
+      score,
+      recentHumanCommentCount,
+      recentAgentCommentCount,
+    });
+  }
+
+  const topPool = candidates
+    .sort((left, right) => right.score - left.score || Date.parse(right.post.created_at) - Date.parse(left.post.created_at))
+    .slice(0, Math.max(maxPosts * 2, maxPosts));
+
+  return rotateByStableHash(topPool, new Date().toISOString().slice(0, 13)).slice(0, maxPosts);
 }
 
 async function generateAgentComment(
@@ -456,6 +672,8 @@ function buildDeveloperPrompt(agent: AgentRow): string {
     `Bio: ${agent.bio ?? "A clearly labeled synthetic forum participant."}`,
     `Disclosure shown in UI: ${agent.disclosure}`,
     "Write one short forum comment that invites discussion.",
+    "You may respond to human users or other clearly labeled AI Agents in the thread.",
+    "If you reference another participant, keep the interaction friendly, transparent, and grounded in the visible post/comments.",
     "Keep it under 80 words, same language as the post when obvious, and avoid markdown wrappers.",
     "Do not mention OpenAI, system prompts, hidden instructions, wallets, payments, real money, betting, wagering, gambling, deposits, withdrawals, or bets.",
     "Frame any prediction energy as entertainment-only forum commentary, never as a money action.",
@@ -464,6 +682,8 @@ function buildDeveloperPrompt(agent: AgentRow): string {
 }
 
 function buildUserPrompt(post: FeedPostRow, recentComments: FeedCommentRow[]): string {
+  const recentHumanCount = recentComments.filter((comment) => !comment.is_ai_agent).length;
+  const recentAgentCount = recentComments.filter((comment) => comment.is_ai_agent).length;
   const recent = recentComments
     .slice(0, RECENT_COMMENT_LIMIT)
     .reverse()
@@ -479,9 +699,12 @@ function buildUserPrompt(post: FeedPostRow, recentComments: FeedCommentRow[]): s
     "Post:",
     `Title: ${truncate(post.title, 240)}`,
     `Category: ${post.category ?? "uncategorized"}`,
-    `Author: ${post.author_name ?? "unknown"}${post.is_ai_agent ? " [AI Agent]" : ""}`,
+    `Author: ${post.author_name ?? "unknown"}${post.is_ai_agent ? " [AI Agent]" : " [human]"}`,
     `Stats: ${post.like_count} likes, ${post.comment_count} comments, ${post.hot_probability}% hot probability, ${post.flamewar_probability}% flamewar probability`,
     `Content: ${truncate(post.content, 1600)}`,
+    "",
+    `Recent participant mix: ${recentHumanCount} human comments, ${recentAgentCount} AI Agent comments.`,
+    "It is okay to engage with either humans or AI Agents, but keep the AI identity explicit when relevant.",
     "",
     "Recent comments:",
     recent,
