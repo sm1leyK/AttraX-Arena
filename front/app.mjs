@@ -4,86 +4,590 @@ import {
   SUPABASE_ANON_KEY,
   SUPABASE_URL,
 } from "./supabase-config.mjs";
+import {
+  DEFAULT_FEATURE_FLAGS,
+  getDisabledNavPages,
+  normalizeFeatureFlags,
+} from "./app-feature-flags.mjs";
+import {
+  COOKIE_PREFERENCES_STORAGE_KEY,
+  DEFAULT_COOKIE_PREFERENCES,
+  buildCookieConsentRecord,
+  buildCookiePreferences,
+  getInitialCookieConsentPrompt,
+  parseCookieConsentRecord,
+  parseCookiePreferences,
+} from "./cookie-consent.mjs";
+import { createLeaderboardMotion } from "./leaderboard-motion.mjs";
+import {
+  OUTE_RAIN_DEFAULTS,
+  buildSupportBoardRainSignature,
+  buildOuteRainDrops,
+  shouldTriggerSupportBoardRain,
+  shouldStartOuteRain,
+} from "./oute-rain.mjs";
+import {
+  SUPPORT_BOARD_DEFAULTS,
+  SUPPORT_BOARD_REALTIME_TABLES,
+  loadSupportBoardPostTrend,
+  loadSupportBoardSnapshot,
+} from "./support-board-data.mjs";
+import {
+  renderSupportBoard as renderSupportBoardModule,
+  renderSupportBoardDetailTrend,
+} from "./support-board-render.mjs";
+import {
+  SUPPORT_BOARD_MAX_DEADLINE_LOCAL,
+  buildSupportDeadlineValidation,
+  formatForDateTimeLocal,
+  getFallbackProjectSubmissionDeadlineConfig,
+  getMarketCountdownSnapshot,
+  getProjectSubmissionCountdownSnapshot,
+  getSupportDeadlineBounds,
+  loadProjectSubmissionDeadlineConfig,
+  parseLocalDateTimeInput,
+  parseTimestamp,
+} from "./support-deadline.mjs";
+import {
+  buildPlacePostBetPayload,
+  classifyPostBetError,
+  getMarketPositionSide,
+  getOppositeSideLockMessage,
+  mapPostBetError,
+  summarizeMarketPosition,
+  toPostBetSuccessMessage,
+  toSettlementStatusMessage,
+} from "./odds-rewards.mjs";
+import {
+  normalizePostImageUrl,
+  renderDetailImage,
+  renderPostImage as renderFeedPostImage,
+} from "./post-media-render.mjs";
+import {
+  buildLensAgentInsight,
+  findSupportBoardSignal,
+} from "./agent-insights.mjs";
+import {
+  createLensAgentInsightClient,
+} from "./lens-agent-remote.mjs";
+import {
+  renderLensAgentDetailCard,
+  renderLensAgentStrip,
+} from "./agent-insights-render.mjs";
+
+const FEATURE_GATES = Object.freeze({
+  wallet: true,
+  postMarketWrites: true,
+});
+
+const LEADERBOARD_REFRESH_MS = 12000;
+const LENS_AGENT_FEED_REFRESH_DELAY_MS = 700;
+const LENS_AGENT_FEED_REFRESH_STEP_MS = 350;
+const LENS_AGENT_FEED_BATCH_LIMIT = 8;
+const MARKET_COUNTDOWN_FALLBACK_MS = 24 * 60 * 60 * 1000;
+const PROJECT_SUBMISSION_COUNTDOWN_KEY = "project-submission";
+const MARKET_DEADLINE_FIELDS = Object.freeze([
+  "end_time",
+  "end_at",
+  "ends_at",
+  "close_at",
+  "closes_at",
+  "deadline_at",
+  "expires_at",
+  "expiry_at",
+  "market_end_at",
+  "market_close_at",
+  "resolution_time",
+  "resolve_at",
+  "support_board_deadline_at",
+  "deadline_at",
+]);
+
+const byIdOrSelector = (id, selector = "") =>
+  document.getElementById(id) ?? (selector ? document.querySelector(selector) : null);
 
 const state = {
   supabase: null,
   session: null,
   user: null,
   profile: null,
+  wallet: null,
+  walletTransactions: [],
+  walletFeatureStatus: FEATURE_GATES.wallet ? "unknown" : "unsupported",
+  walletStatus: null,
+  walletError: null,
+  lastWalletRewardAttemptKey: null,
+  featureFlags: { ...DEFAULT_FEATURE_FLAGS },
+  disabledNavPages: getDisabledNavPages(DEFAULT_FEATURE_FLAGS),
   posts: [],
   hotPosts: [],
+  nonSupportHotPosts: [],
   activeActors: [],
   chaosPosts: [],
   predictionCards: [],
+  supportBoardItems: [],
+  supportBoardSeriesByKey: {},
+  supportBoardDataSource: "unknown",
+  supportBoardRainSignature: null,
   detailComments: [],
   detailPredictions: [],
+  detailUserBets: [],
+  detailSupportBoardItem: null,
+  detailSupportBoardSeries: [],
+  detailSupportBoardMarketType: SUPPORT_BOARD_DEFAULTS.marketType,
+  detailSupportBoardDataSource: "unknown",
+  userPostMarketBets: [],
   detailPostId: null,
   currentDetailPost: null,
   currentLikeId: null,
+  initialSharedPostId: null,
   feedMode: "latest",
-  leaderboardTab: "热帖榜",
+  leaderboardTab: "Hot Posts",
   leaderboardTime: "今日",
   isLogin: true,
   createImageFile: null,
+  pendingDetailLikeBurst: false,
+  postBetFeatureStatus: FEATURE_GATES.postMarketWrites ? "unknown" : "unsupported",
+  lensAgentClient: null,
+  lensAgentFeedRefreshTimer: null,
+  lensAgentFeedRefreshToken: 0,
+  leaderboardRealtimeChannel: null,
+  leaderboardRefreshTimer: null,
+  leaderboardRefreshInFlight: false,
+  leaderboardRefreshPending: false,
+  leaderboardRealtimeSubscribed: false,
+  countdownTimers: new Map(),
+  projectSubmissionDeadlineConfig: getFallbackProjectSubmissionDeadlineConfig(),
+  searchQuery: "",
+  searchResults: [],
+  searchStatus: "idle",
+  searchAppliedQuery: "",
+  searchAppliedActor: null,
+  searchDebounceTimer: null,
+  searchRequestToken: 0,
+  profileTab: "posts",
+  profilePosts: [],
+  profileComments: [],
+  profileBookmarks: [],
+  bookmarkedPostIds: [],
+  cookiePreferences: null,
+  cookieConsentSyncInFlight: false,
 };
 
+state.supportBoardFilter = "all";
+state.expandedSupportPostId = null;
+
+function supportsSupportBoard(post) {
+  return post?.participates_in_support_board !== false;
+}
+
+function getOwnPostMarketLockMessage() {
+  return "Post authors cannot join the stance market for their own posts.";
+}
+
+function isCurrentUserPostAuthor(post) {
+  if (!post || !state.user) {
+    return false;
+  }
+
+  if (post.author_kind === "human" && post.author_profile_id === state.user.id) {
+    return true;
+  }
+
+  return post.author_kind === "agent" && post.author_agent_owner_id === state.user.id;
+}
+
+function getSupportParticipationLabel(post) {
+  return supportsSupportBoard(post) ? "参与支持率排行" : "不参与支持率排行";
+}
+
+function computePureHotScore(post) {
+  return Number(post?.like_count || 0) + Number(post?.comment_count || 0) * 2;
+}
+
+function syncCreateSupportControls({ preserveValue = true } = {}) {
+  const enabled = Boolean(els.createSupportToggle?.checked);
+  const deadlineWrap = els.createSupportDeadlineWrap;
+  const deadlineInput = els.createSupportDeadlineInput;
+  const deadlineHelp = els.createSupportDeadlineHelp;
+
+  if (!deadlineWrap || !deadlineInput) {
+    return;
+  }
+
+  deadlineWrap.hidden = !enabled;
+
+  if (!enabled) {
+    if (!preserveValue) {
+      deadlineInput.value = "";
+    }
+    if (deadlineHelp) {
+      deadlineHelp.textContent = "未参与支持率排行时，无需设置截止时间。";
+    }
+    return;
+  }
+
+  const { minDate, maxDate } = getSupportDeadlineBounds();
+  deadlineInput.min = formatForDateTimeLocal(minDate);
+  deadlineInput.max = SUPPORT_BOARD_MAX_DEADLINE_LOCAL;
+
+  if (!preserveValue || !deadlineInput.value) {
+    const defaultDate = new Date(Math.min(maxDate.getTime(), minDate.getTime() + 60 * 60000));
+    deadlineInput.value = formatForDateTimeLocal(defaultDate);
+  }
+
+  const validation = buildSupportDeadlineValidation(parseLocalDateTimeInput(deadlineInput.value));
+  if (deadlineHelp) {
+    deadlineHelp.textContent = validation.ok
+      ? `当前倒计时 ${validation.message}，最晚可设置到 2026 年 4 月 26 日 18:00。`
+      : validation.message;
+  }
+}
+
+const MOCK_HOT_POSTS = Object.freeze([
+  {
+    post_id: "mock-hot-001",
+    title: "三个 Agent 互相对线笑死我了",
+    author_name: "赛博浪客",
+    hot_score: 18247,
+    author_disclosure: "社区热帖 mock 数据",
+    is_ai_agent: false,
+  },
+  {
+    post_id: "mock-hot-002",
+    title: "梗王Bot 的今日预言合集",
+    author_name: "梗王Bot",
+    hot_score: 12103,
+    author_disclosure: "AI 生成内容",
+    is_ai_agent: true,
+  },
+  {
+    post_id: "mock-hot-003",
+    title: "让 Agent 预测彩票号码",
+    author_name: "整活大师",
+    hot_score: 9712,
+    author_disclosure: "High-energy mock content",
+    is_ai_agent: false,
+  },
+  {
+    post_id: "mock-hot-004",
+    title: "Roast Bot index leaderboard",
+    author_name: "匿名用户",
+    hot_score: 8421,
+    author_disclosure: "榜单类 mock 数据",
+    is_ai_agent: false,
+  },
+  {
+    post_id: "mock-hot-005",
+    title: "新手指南：如何让 Agent 闭嘴",
+    author_name: "佛系楼主",
+    hot_score: 6198,
+    author_disclosure: "论坛引导内容",
+    is_ai_agent: false,
+  },
+]);
+
+const MOCK_ACTIVE_ACTORS = Object.freeze([
+  {
+    actor_id: "mock-actor-001",
+    actor_name: "赛博浪客",
+    actor_handle: "@cyberwanderer",
+    actor_kind: "human",
+    actor_avatar_url: null,
+    activity_score: 2847,
+    post_count: 147,
+    comment_count: 389,
+    prediction_count: 12,
+    actor_disclosure: "社区头部活跃用户",
+    is_ai_agent: false,
+  },
+  {
+    actor_id: "mock-actor-002",
+    actor_name: "整活大师",
+    actor_handle: "@meme_master",
+    actor_kind: "human",
+    actor_avatar_url: null,
+    activity_score: 2103,
+    post_count: 88,
+    comment_count: 241,
+    prediction_count: 6,
+    actor_disclosure: "Core prank-event player",
+    is_ai_agent: false,
+  },
+  {
+    actor_id: "mock-actor-003",
+    actor_name: "梗王Bot",
+    actor_handle: "@king_of_memes",
+    actor_kind: "agent",
+    actor_avatar_url: null,
+    activity_score: 1956,
+    post_count: 63,
+    comment_count: 180,
+    prediction_count: 23,
+    actor_disclosure: "AI 生成内容",
+    is_ai_agent: true,
+  },
+  {
+    actor_id: "mock-actor-004",
+    actor_name: "毒舌Bot",
+    actor_handle: "@roast_engine",
+    actor_kind: "agent",
+    actor_avatar_url: null,
+    activity_score: 1730,
+    post_count: 41,
+    comment_count: 266,
+    prediction_count: 17,
+    actor_disclosure: "AI 生成内容",
+    is_ai_agent: true,
+  },
+]);
+
+const MOCK_PREDICTION_CARDS = Object.freeze([
+  {
+    post_id: "mock-hot-002",
+    predictor_name: "梗王Bot",
+    predictor_handle: "@king_of_memes",
+    predictor_disclosure: "AI 生成内容",
+    prediction_label: "今日预言",
+    headline: "A new hot post will appear before 10 AM tomorrow.",
+    probability: 92,
+    odds_value: 92,
+    is_ai_agent: true,
+  },
+  {
+    post_id: "mock-hot-004",
+    predictor_name: "毒舌Bot",
+    predictor_handle: "@roast_engine",
+    predictor_disclosure: "AI 生成内容",
+    prediction_label: "评论风向",
+    headline: "This help post will turn into a prank thread within 2 hours.",
+    probability: 88,
+    odds_value: 88,
+    is_ai_agent: true,
+  },
+  {
+    post_id: "mock-hot-003",
+    predictor_name: "预言家Bot",
+    predictor_handle: "@oracle_signal",
+    predictor_disclosure: "AI 生成内容",
+    prediction_label: "Hit Rate Update",
+    headline: "Engagement on the next challenge post will keep rising.",
+    probability: 85,
+    odds_value: 85,
+    is_ai_agent: true,
+  },
+]);
+
+const MOCK_CHAOS_POSTS = Object.freeze([
+  {
+    post_id: "mock-chaos-001",
+    title: "Why I do not recommend dating an Agent",
+    author_name: "赛博浪客",
+    chaos_score: 96,
+    flamewar_probability: 91,
+    recent_agent_comment_count: 23,
+    author_disclosure: "高争议 mock 帖子",
+    is_ai_agent: false,
+  },
+  {
+    post_id: "mock-chaos-002",
+    title: "Roast Bot index leaderboard",
+    author_name: "匿名用户",
+    chaos_score: 88,
+    flamewar_probability: 83,
+    recent_agent_comment_count: 18,
+    author_disclosure: "评论区高活跃",
+    is_ai_agent: false,
+  },
+  {
+    post_id: "mock-chaos-003",
+    title: "Agent Debate Tournament Season One Recap",
+    author_name: "官方Bot",
+    chaos_score: 79,
+    flamewar_probability: 72,
+    recent_agent_comment_count: 14,
+    author_disclosure: "AI 生成内容",
+    is_ai_agent: true,
+  },
+]);
+
 const els = {
-  feedPosts: document.getElementById("feedPosts"),
-  homeHotPostsCard: document.getElementById("homeHotPostsCard"),
-  homeActiveActorsCard: document.getElementById("homeActiveActorsCard"),
-  homePredictionCard: document.getElementById("homePredictionCard"),
-  detailTags: document.getElementById("detailTags"),
-  detailTitle: document.getElementById("detailTitle"),
-  detailAuthorRow: document.getElementById("detailAuthorRow"),
-  detailMedia: document.getElementById("detailMedia"),
-  detailContent: document.getElementById("detailContent"),
-  detailActions: document.getElementById("detailActions"),
-  detailOddsModule: document.getElementById("detailOddsModule"),
-  detailCommentsTitle: document.getElementById("detailCommentsTitle"),
-  detailCommentsList: document.getElementById("detailCommentsList"),
-  commentInput: document.getElementById("commentInput"),
-  commentSubmit: document.getElementById("commentSubmit"),
-  createTitleInput: document.getElementById("createTitleInput"),
-  createBodyInput: document.getElementById("createBodyInput"),
-  createUploadArea: document.getElementById("createUploadArea"),
-  createUploadLabel: document.getElementById("createUploadLabel"),
-  createImageInput: document.getElementById("createImageInput"),
-  publishButton: document.getElementById("publishButton"),
+  feedPosts: byIdOrSelector("feedPosts", ".feed"),
+  homeHotPostsCard: byIdOrSelector("homeHotPostsCard", ".sidebar .sidebar-card:nth-of-type(1)"),
+  homePureHotCard: byIdOrSelector("homePureHotCard", ".sidebar .sidebar-card:nth-of-type(2)"),
+  homeActiveActorsCard: byIdOrSelector("homeActiveActorsCard"),
+  homePredictionCard: byIdOrSelector("homePredictionCard"),
+  detailTags: byIdOrSelector("detailTags", ".detail-tags"),
+  detailTitle: byIdOrSelector("detailTitle", ".detail-title"),
+  detailAuthorRow: byIdOrSelector("detailAuthorRow", ".detail-author-row"),
+  detailMedia: byIdOrSelector("detailMedia", ".detail-image-placeholder"),
+  detailContent: byIdOrSelector("detailContent", ".detail-content"),
+  detailActions: byIdOrSelector("detailActions", ".detail-actions"),
+  detailOddsModule: byIdOrSelector("detailOddsModule", ".odds-module"),
+  detailCommentsTitle: byIdOrSelector("detailCommentsTitle", ".comments-title"),
+  detailCommentsList: byIdOrSelector("detailCommentsList", ".comments-section"),
+  commentInput: byIdOrSelector("commentInput", ".comment-input"),
+  commentSubmit: byIdOrSelector("commentSubmit", ".comment-submit"),
+  createTitleInput: byIdOrSelector("createTitleInput", ".create-title-input"),
+  createBodyInput: byIdOrSelector("createBodyInput", ".create-body-input"),
+  createUploadArea: byIdOrSelector("createUploadArea", ".create-upload-area"),
+  createUploadLabel: byIdOrSelector("createUploadLabel", ".create-upload-area span"),
+  createImageInput: byIdOrSelector("createImageInput", "#page-create input[type=\"file\"]"),
+  createSupportToggle: byIdOrSelector("createSupportToggle", "#page-create #createSupportToggle"),
+  createSupportDeadlineWrap: byIdOrSelector("createSupportDeadlineWrap", "#page-create #createSupportDeadlineWrap"),
+  createSupportDeadlineInput: byIdOrSelector("createSupportDeadlineInput", "#page-create #createSupportDeadlineInput"),
+  createSupportDeadlineHelp: byIdOrSelector("createSupportDeadlineHelp", "#page-create #createSupportDeadlineHelp"),
+  publishButton: byIdOrSelector("publishButton", ".btn-publish"),
   authTitle: document.getElementById("auth-title"),
   authSubtitle: document.getElementById("auth-subtitle"),
   authHelp: document.getElementById("auth-help"),
-  authPrimaryLabel: document.getElementById("auth-primary-label"),
-  authPrimaryInput: document.getElementById("auth-primary-input"),
+  authPrimaryLabel: byIdOrSelector("auth-primary-label", "#auth-user-label"),
+  authPrimaryInput: byIdOrSelector("auth-primary-input", "#auth-user-input"),
   authEmailField: document.getElementById("auth-email-field"),
-  authEmailInput: document.getElementById("auth-email-input"),
-  authPasswordInput: document.getElementById("auth-password-input"),
+  authEmailInput: byIdOrSelector("auth-email-input", '#auth-email-field input[type="email"]'),
+  authPasswordInput: byIdOrSelector("auth-password-input", '#page-auth input[type="password"]'),
   authButton: document.getElementById("auth-btn"),
   authStatus: document.getElementById("auth-status"),
   authSwitch: document.getElementById("auth-switch"),
-  createStatus: document.getElementById("create-status"),
-  commentStatus: document.getElementById("comment-status"),
+  createStatus: byIdOrSelector("create-status", "#page-create .inline-status"),
+  commentStatus: byIdOrSelector("comment-status", "#page-detail .inline-status"),
+  profileName: document.querySelector("#page-profile .profile-name"),
+  profileBio: document.querySelector("#page-profile .profile-bio"),
+  profilePostCount: document.querySelectorAll("#page-profile .profile-stat-val")[0] ?? null,
+  profileWalletBalance: document.querySelectorAll("#page-profile .profile-stat-val")[1] ?? null,
+  profileRewardCount: document.querySelectorAll("#page-profile .profile-stat-val")[2] ?? null,
+  profileStatLabels: document.querySelectorAll("#page-profile .profile-stat-label"),
+  profileWalletCard: byIdOrSelector("profileWalletCard", ".profile-wallet-card"),
+  profileWalletStatus: byIdOrSelector("profileWalletStatus", ".profile-wallet-status"),
+  profileWalletSummary: byIdOrSelector("profileWalletSummary", ".profile-wallet-summary"),
+  profileWalletTransactions: byIdOrSelector("profileWalletTransactions", ".profile-wallet-transactions"),
+  profileTabs: document.querySelectorAll("#page-profile .profile-tab"),
   lbTable: document.getElementById("lbTable"),
+  lbLiveStatus: document.getElementById("lbLiveStatus"),
   modal: document.getElementById("activityModal"),
   preview: document.getElementById("userPreview"),
   previewName: document.getElementById("previewName"),
   previewPosts: document.getElementById("pvPosts"),
   previewLikes: document.getElementById("pvLikes"),
   previewStreak: document.getElementById("pvStreak"),
+  globalSearchShell: document.getElementById("globalSearchShell"),
+  globalSearchInput: document.getElementById("globalSearchInput"),
+  globalSearchClear: document.getElementById("globalSearchClear"),
+  globalSearchDropdown: document.getElementById("globalSearchDropdown"),
+  globalSearchStatus: document.getElementById("globalSearchStatus"),
+  globalSearchResults: document.getElementById("globalSearchResults"),
+  globalSearchApply: document.getElementById("globalSearchApply"),
+  projectSubmissionCountdown: document.getElementById("projectSubmissionCountdown"),
+  projectSubmissionCountdownValue: document.getElementById("projectSubmissionCountdownValue"),
+  projectSubmissionCountdownStatus: document.getElementById("projectSubmissionCountdownStatus"),
+  cookieConsentBar: document.getElementById("cookieConsentBar"),
+  cookieModal: document.getElementById("cookieModal"),
+  cookieSwitches: document.querySelectorAll("#cookieModal .cookie-switch[data-cookie]"),
 };
 
 const navLoginButton = document.querySelector(".btn-login");
 const navAvatar = document.querySelector(".user-avatar");
-const profilePostsContainer = document.getElementById("profilePostList");
+const userMenuWrap = document.getElementById("userMenuWrap");
+const userDropdown = document.getElementById("userDropdown");
+const profilePostsContainer = byIdOrSelector("profilePostList", ".profile-post-list");
+const leaderboardMotion = createLeaderboardMotion({
+  container: els.lbTable,
+  statusEl: els.lbLiveStatus,
+  getKey: (row) => row.id,
+  renderRow: renderLeaderboardRow,
+});
 const configReady = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY && /^https?:\/\//.test(SUPABASE_URL));
+const BOOKMARK_STORAGE_KEY = "attrax_bookmarked_posts_v1";
+function getInitialSharedPostId() {
+  try {
+    const url = new URL(window.location.href);
+    return url.searchParams.get("post") || "";
+  } catch (_error) {
+    return "";
+  }
+}
+
+function buildPostShareUrl(postId) {
+  const url = new URL(window.location.href);
+  url.searchParams.set("post", postId);
+  url.hash = "";
+  return url.toString();
+}
+
+const ensureMotionLayer = () => {
+  let layer = byIdOrSelector("motionGlobalLayer");
+  if (!layer) {
+    layer = document.createElement("div");
+    layer.id = "motionGlobalLayer";
+    layer.className = "motion-global-layer";
+    document.body.appendChild(layer);
+  }
+  return layer;
+};
+const motionLayer = ensureMotionLayer();
+const motionDemoState = {
+  liked: false,
+  bookmarked: false,
+  likes: 128,
+  bookmarks: 42,
+  shares: 9,
+  comments: 18,
+  balance: 1250,
+  combo: 0,
+  yes: 58,
+  toastTimer: null,
+  botTimer: null,
+  feed: [
+    { actor: "System", text: "Motion lab ready. Try the buttons below.", tone: "system" },
+    { actor: "@arena_signal", text: "Local-only demo state is running. Hook your real API after the animation feels right.", tone: "bot" },
+  ],
+  commentStream: [
+    { actor: "@ops_echo", text: "This is the kind of micro-feedback that makes a feed feel alive." },
+    { actor: "@agent_watch", text: "Click comment once and watch the bubble enter without a full page refresh." },
+  ],
+};
+const motionEls = {
+  root: byIdOrSelector("motionLab"),
+  likeButton: byIdOrSelector("motionLikeBtn"),
+  likeCount: byIdOrSelector("motionLikeCount"),
+  bookmarkButton: byIdOrSelector("motionBookmarkBtn"),
+  bookmarkCount: byIdOrSelector("motionBookmarkCount"),
+  shareButton: byIdOrSelector("motionShareBtn"),
+  shareCount: byIdOrSelector("motionShareCount"),
+  commentPulseButton: byIdOrSelector("motionCommentPulseBtn"),
+  commentCount: byIdOrSelector("motionCommentCount"),
+  commentInput: byIdOrSelector("motionCommentInput"),
+  commentSend: byIdOrSelector("motionCommentSend"),
+  commentStream: byIdOrSelector("motionCommentStream"),
+  balance: byIdOrSelector("motionBalance"),
+  combo: byIdOrSelector("motionCombo"),
+  yesFill: byIdOrSelector("motionYesFill"),
+  noFill: byIdOrSelector("motionNoFill"),
+  oddsMeta: byIdOrSelector("motionOddsMeta"),
+  betYesButton: byIdOrSelector("motionBetYesBtn"),
+  betNoButton: byIdOrSelector("motionBetNoBtn"),
+  feed: byIdOrSelector("motionLiveFeed"),
+  toast: byIdOrSelector("motionToast"),
+};
 
 init();
 
 function init() {
   initSplash();
   initCursorGlow();
+  initOuteRain();
+  initProjectSubmissionCountdown();
+  state.initialSharedPostId = getInitialSharedPostId();
+  if (state.initialSharedPostId) {
+    state.detailPostId = state.initialSharedPostId;
+  }
+  state.bookmarkedPostIds = loadBookmarkedPostIds();
   initGlobals();
   initStaticInteractions();
-  renderAuthMode();
+  applyFeatureGates();
+  initCookieConsent();
+  renderAuthModeCompat();
+  syncCreateSupportControls({ preserveValue: false });
   updateAuthUi();
 
   if (!configReady) {
@@ -98,12 +602,17 @@ function init() {
       detectSessionInUrl: true,
     },
   });
+  state.lensAgentClient = createLensAgentInsightClient({
+    supabase: state.supabase,
+  });
 
+  void refreshProjectSubmissionDeadlineConfig();
   void bootstrapData();
 }
 
 async function bootstrapData() {
   await refreshSession();
+  await loadAppFeatureFlags();
 
   state.supabase.auth.onAuthStateChange((_event, session) => {
     state.session = session;
@@ -111,10 +620,17 @@ async function bootstrapData() {
     void handleAuthChange();
   });
 
-  await Promise.allSettled([
-    loadHomepageData(),
-    loadLeaderboardData(),
-  ]);
+  const bootstrapLoads = [loadHomepageData()];
+  if (!state.disabledNavPages.has("leaderboard")) {
+    bootstrapLoads.push(loadLeaderboardData({ render: false }));
+  }
+
+  await Promise.allSettled(bootstrapLoads);
+
+  if (!state.disabledNavPages.has("leaderboard")) {
+    renderLeaderboard({ mode: "replace", reason: "initial-load" });
+    startLeaderboardLiveUpdates();
+  }
 
   if (!state.detailPostId && state.posts.length > 0) {
     state.detailPostId = state.posts[0].id;
@@ -123,11 +639,18 @@ async function bootstrapData() {
   if (state.detailPostId) {
     await loadDetailData(state.detailPostId);
   }
+
+  if (state.initialSharedPostId && state.currentDetailPost) {
+    navigate("detail");
+  }
 }
 
 async function handleAuthChange() {
   await loadProfile();
+  await syncCookieConsentWithBackend();
+  await ensureWalletExperience({ reason: "auth-change", allowDailyReward: true });
   updateAuthUi();
+  renderProfileWallet();
   await renderProfilePosts();
 
   if (state.detailPostId) {
@@ -144,7 +667,10 @@ async function refreshSession() {
   state.session = session;
   state.user = session?.user ?? null;
   await loadProfile();
+  await syncCookieConsentWithBackend();
+  await ensureWalletExperience({ reason: "session-refresh", allowDailyReward: true });
   updateAuthUi();
+  renderProfileWallet();
   await renderProfilePosts();
 }
 
@@ -152,6 +678,11 @@ async function loadProfile() {
   state.profile = null;
 
   if (!state.user) {
+    state.wallet = null;
+    state.walletTransactions = [];
+    state.walletStatus = null;
+    state.walletError = null;
+    state.lastWalletRewardAttemptKey = null;
     return;
   }
 
@@ -166,12 +697,192 @@ async function loadProfile() {
   }
 }
 
-async function loadHomepageData() {
-  const [postsResult, hotResult, activeResult, predictionResult] = await Promise.all([
+async function loadWalletSummary() {
+  state.wallet = null;
+
+  if (!FEATURE_GATES.wallet) {
+    state.walletFeatureStatus = "unsupported";
+    state.walletStatus = "Wallet module is not enabled on this backend yet.";
+    state.walletError = null;
+    return null;
+  }
+
+  if (!state.user || !configReady) {
+    return null;
+  }
+
+  const { data, error } = await state.supabase
+    .from("wallets")
+    .select("id, balance, lifetime_earned, lifetime_spent, last_rewarded_at")
+    .eq("owner_profile_id", state.user.id)
+    .maybeSingle();
+
+  if (error) {
+    if (isMissingBackendFeatureError(error.message)) {
+      state.walletFeatureStatus = "unsupported";
+      state.walletStatus = "Wallet module is not enabled on this backend yet.";
+      state.walletError = null;
+      return null;
+    }
+
+    state.walletError = error.message;
+    return null;
+  }
+
+  state.walletFeatureStatus = "ready";
+  state.wallet = data ?? null;
+  return state.wallet;
+}
+
+async function loadWalletTransactions() {
+  state.walletTransactions = [];
+
+  if (!FEATURE_GATES.wallet) {
+    state.walletFeatureStatus = "unsupported";
+    return [];
+  }
+
+  if (!state.wallet?.id || !configReady || state.walletFeatureStatus === "unsupported") {
+    return [];
+  }
+
+  const { data, error } = await state.supabase
+    .from("wallet_transactions")
+    .select("id, direction, transaction_type, amount, description, created_at")
+    .eq("wallet_id", state.wallet.id)
+    .order("created_at", { ascending: false })
+    .limit(8);
+
+  if (error) {
+    if (isMissingBackendFeatureError(error.message)) {
+      state.walletFeatureStatus = "unsupported";
+      state.walletStatus = "Wallet module is not enabled on this backend yet.";
+      state.walletError = null;
+      return [];
+    }
+
+    state.walletError = error.message;
+    return [];
+  }
+
+  state.walletTransactions = data ?? [];
+  return state.walletTransactions;
+}
+
+async function refreshWalletModule() {
+  state.walletError = null;
+  await loadWalletSummary();
+  await loadWalletTransactions();
+  renderProfileWallet();
+}
+
+async function invokeRewardFunction(functionName, retries = 1) {
+  if (!FEATURE_GATES.wallet) {
+    state.walletFeatureStatus = "unsupported";
+    return {
+      ok: false,
+      code: "feature_unavailable",
+      message: "Wallet reward functions are not deployed on this backend yet.",
+    };
+  }
+
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    const { data, error } = await state.supabase.functions.invoke(functionName, {
+      body: {},
+    });
+
+    if (error && isMissingBackendFeatureError(error.message)) {
+      state.walletFeatureStatus = "unsupported";
+      return {
+        ok: false,
+        code: "feature_unavailable",
+        message: "Wallet reward functions are not deployed on this backend yet.",
+      };
+    }
+
+    if (!error && data?.ok) {
+      return data;
+    }
+
+    if (data?.code !== "profile_not_ready" || attempt === retries) {
+      if (error) {
+        return { ok: false, code: "invoke_failed", message: error.message };
+      }
+      return data ?? { ok: false, code: "unknown_error", message: "Reward function failed." };
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 800));
+  }
+
+  return { ok: false, code: "reward_retry_exhausted", message: "Reward retry exhausted." };
+}
+
+async function ensureWalletExperience({ reason, allowDailyReward }) {
+  if (!state.user || !configReady) {
+    state.wallet = null;
+    state.walletTransactions = [];
+    state.walletFeatureStatus = FEATURE_GATES.wallet ? "unknown" : "unsupported";
+    state.walletStatus = null;
+    state.walletError = null;
+    renderProfileWallet();
+    return;
+  }
+
+  if (!FEATURE_GATES.wallet) {
+    state.wallet = null;
+    state.walletTransactions = [];
+    state.walletFeatureStatus = "unsupported";
+    state.walletStatus = "Wallet module is not enabled on this backend yet.";
+    state.walletError = null;
+    renderProfileWallet();
+    return;
+  }
+
+  if (state.walletFeatureStatus === "unsupported") {
+    state.wallet = null;
+    state.walletTransactions = [];
+    state.walletStatus = "Wallet module is not enabled on this backend yet.";
+    state.walletError = null;
+    renderProfileWallet();
+    return;
+  }
+
+  const rewardAttemptKey = `${state.user.id}:${new Date().toISOString().slice(0, 10)}`;
+  state.walletError = null;
+
+  if (reason === "signup") {
+    const signupResult = await invokeRewardFunction("reconcile-signup-bonus", 3);
+    if (signupResult.ok) {
+      state.walletStatus = signupResult.reward_granted
+        ? `+${signupResult.reward_amount} starter coins`
+        : "Starter coins already granted";
+    } else if (signupResult.code) {
+      state.walletError = signupResult.message ?? signupResult.code;
+    }
+  }
+
+  if (allowDailyReward && state.lastWalletRewardAttemptKey !== rewardAttemptKey) {
+    state.lastWalletRewardAttemptKey = rewardAttemptKey;
+    const dailyResult = await invokeRewardFunction("claim-daily-login-reward", 1);
+    if (dailyResult.ok) {
+      state.walletStatus = dailyResult.granted
+        ? `Daily reward claimed: +${dailyResult.reward_amount}`
+        : "Today's daily reward already claimed";
+    } else if (dailyResult.code && !state.walletError) {
+      state.walletError = dailyResult.message ?? dailyResult.code;
+    }
+  }
+
+  await refreshWalletModule();
+}
+
+async function loadHomepageData({ render = true } = {}) {
+  const [postsResult, hotResult, nonSupportHotResult, activeResult, predictionResult] = await Promise.all([
     state.supabase.from("feed_posts").select("*").order("created_at", { ascending: false }),
     state.supabase.from("hot_posts_rankings").select("*").order("rank_position", { ascending: true }).limit(8),
+    state.supabase.from("non_support_hot_posts_rankings").select("*").order("rank_position", { ascending: true }).limit(8),
     state.supabase.from("active_actor_rankings").select("*").order("rank_position", { ascending: true }).limit(8),
-    state.supabase.from("post_prediction_cards").select("*").order("created_at", { ascending: false }).limit(8),
+    state.supabase.from("homepage_odds_rankings").select("*").order("rank_position", { ascending: true }).limit(8),
   ]);
 
   if (!postsResult.error) {
@@ -185,6 +896,10 @@ async function loadHomepageData() {
     state.hotPosts = hotResult.data ?? [];
   }
 
+  if (!nonSupportHotResult.error) {
+    state.nonSupportHotPosts = nonSupportHotResult.data ?? [];
+  }
+
   if (!activeResult.error) {
     state.activeActors = activeResult.data ?? [];
   }
@@ -193,13 +908,770 @@ async function loadHomepageData() {
     state.predictionCards = predictionResult.data ?? [];
   }
 
-  renderFeed();
-  renderHomeHotPosts();
-  renderHomeActiveActors();
-  renderHomePredictions();
+  if (state.hotPosts.length === 0) {
+    state.hotPosts = [...MOCK_HOT_POSTS];
+  }
+
+  if (state.nonSupportHotPosts.length === 0) {
+    state.nonSupportHotPosts = [...state.posts]
+      .filter((post) => !supportsSupportBoard(post))
+      .sort((left, right) => computePureHotScore(right) - computePureHotScore(left))
+      .slice(0, 8)
+      .map((post, index) => ({
+        post_id: post.id,
+        title: post.title,
+        author_name: post.author_name,
+        like_count: Number(post.like_count || 0),
+        comment_count: Number(post.comment_count || 0),
+        pure_hot_score: computePureHotScore(post),
+        rank_position: index + 1,
+        created_at: post.created_at,
+      }));
+  }
+
+  if (state.activeActors.length === 0) {
+    state.activeActors = [...MOCK_ACTIVE_ACTORS];
+  }
+
+  if (state.predictionCards.length === 0) {
+    state.predictionCards = [...MOCK_PREDICTION_CARDS];
+  }
+
+  if (state.predictionCards.length < SUPPORT_BOARD_DEFAULTS.limit) {
+    state.predictionCards = mergePredictionCards(state.predictionCards, MOCK_PREDICTION_CARDS);
+  }
+
+  await loadUserPostMarketBets();
+  await loadHomepageSupportBoardData();
+  if (state.supportBoardRainSignature === null) {
+    rememberSupportBoardRainSignature();
+  }
+
+  if (render) {
+    renderFeed();
+    renderLiveSupportBoard();
+    renderPureHotPostsSidebar();
+  }
 }
 
-async function loadLeaderboardData() {
+async function loadAppFeatureFlags() {
+  if (!state.supabase) {
+    state.featureFlags = { ...DEFAULT_FEATURE_FLAGS };
+    state.disabledNavPages = getDisabledNavPages(state.featureFlags);
+    applyFeatureGates();
+    return;
+  }
+
+  const { data, error } = await state.supabase.rpc("get_app_feature_flags");
+
+  if (error) {
+    console.warn("Feature flags unavailable; using local defaults.", error.message);
+    state.featureFlags = { ...DEFAULT_FEATURE_FLAGS };
+  } else {
+    state.featureFlags = normalizeFeatureFlags(data);
+  }
+
+  state.disabledNavPages = getDisabledNavPages(state.featureFlags);
+  applyFeatureGates();
+}
+
+function applyFeatureGates() {
+  document.querySelectorAll(".nav-link[data-page]").forEach((link) => {
+    const page = link.dataset.page;
+    const disabled = state.disabledNavPages.has(page);
+
+    link.classList.toggle("nav-link-disabled", disabled);
+    if (disabled) {
+      link.setAttribute("aria-disabled", "true");
+      link.setAttribute("tabindex", "-1");
+      link.setAttribute("title", "暂不开放");
+      link.onclick = null;
+      return;
+    }
+
+    link.removeAttribute("aria-disabled");
+    link.removeAttribute("tabindex");
+    if (link.getAttribute("title") === "暂不开放") {
+      link.removeAttribute("title");
+    }
+    if (!link.getAttribute("onclick")) {
+      link.onclick = () => navigate(page);
+    }
+  });
+}
+
+async function loadUserPostMarketBets() {
+  state.userPostMarketBets = [];
+
+  if (!state.user || !state.supabase || state.posts.length === 0) {
+    return;
+  }
+
+  if (!FEATURE_GATES.postMarketWrites || state.postBetFeatureStatus === "unsupported") {
+    return;
+  }
+
+  const postIds = state.posts.map((post) => post.id).filter(Boolean);
+  if (postIds.length === 0) {
+    return;
+  }
+
+  const { data, error } = await state.supabase
+    .from("post_market_bets")
+    .select("id, post_id, market_type, side, amount, odds_snapshot, payout_amount, payout_claimed, settled_at, settled_side, created_at")
+    .in("post_id", postIds)
+    .eq("profile_id", state.user.id)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    if (classifyPostBetError(error.message) === "missing") {
+      state.postBetFeatureStatus = "unsupported";
+    }
+
+    return;
+  }
+
+  state.userPostMarketBets = data ?? [];
+}
+
+function mergePredictionCards(primaryCards = [], fallbackCards = []) {
+  const merged = [];
+  const seenKeys = new Set();
+
+  [...primaryCards, ...fallbackCards].forEach((item) => {
+    const key = `${item?.post_id || "unknown"}:${item?.prediction_type || item?.prediction_label || item?.predictor_name || "card"}`;
+    if (!item?.post_id || seenKeys.has(key)) {
+      return;
+    }
+
+    seenKeys.add(key);
+    merged.push(item);
+  });
+
+  return merged.slice(0, Math.max(SUPPORT_BOARD_DEFAULTS.limit, primaryCards.length));
+}
+
+function normalizeSearchValue(value) {
+  return String(value ?? "").trim().toLowerCase();
+}
+
+function scoreSearchMatch(text, query) {
+  const haystack = normalizeSearchValue(text);
+  const needle = normalizeSearchValue(query);
+  if (!haystack || !needle) {
+    return 0;
+  }
+
+  if (haystack === needle) {
+    return 120;
+  }
+
+  if (haystack.startsWith(needle)) {
+    return 90;
+  }
+
+  const position = haystack.indexOf(needle);
+  if (position >= 0) {
+    return Math.max(45 - position, 18);
+  }
+
+  return 0;
+}
+
+function buildSearchResult({
+  resultType,
+  entityId,
+  title,
+  subtitle = "",
+  snippet = "",
+  route = "home",
+  routeContext = "",
+  rankScore = 0,
+}) {
+  return {
+    result_type: resultType,
+    entity_id: entityId,
+    title,
+    subtitle,
+    snippet,
+    route,
+    route_context: routeContext,
+    rank_score: rankScore,
+  };
+}
+
+function buildLocalSearchResults(query) {
+  const postResults = state.posts
+    .map((post) => {
+      const rankScore = Math.max(
+        scoreSearchMatch(post.title, query) + 12,
+        scoreSearchMatch(post.author_name, query) + 8,
+        scoreSearchMatch(post.category, query) + 6,
+        scoreSearchMatch(post.content, query),
+      );
+
+      if (!rankScore) {
+        return null;
+      }
+
+      return buildSearchResult({
+        resultType: "post",
+        entityId: post.id,
+        title: post.title,
+        subtitle: `${post.author_name || "Unknown"} · ${post.category || "帖子"}`,
+        snippet: trimText(post.content, 120),
+        route: "detail",
+        routeContext: post.id,
+        rankScore,
+      });
+    })
+    .filter(Boolean);
+
+  const actorMap = new Map();
+  [...state.activeActors, ...state.posts].forEach((item) => {
+    const name = item.actor_name || item.author_name;
+    if (!name) {
+      return;
+    }
+
+    const key = `${item.is_ai_agent || item.actor_kind === "agent" ? "agent" : "profile"}:${name}`;
+    if (actorMap.has(key)) {
+      return;
+    }
+
+    const resultType = item.is_ai_agent || item.actor_kind === "agent" ? "agent" : "profile";
+    actorMap.set(key, buildSearchResult({
+      resultType,
+      entityId: item.actor_id || item.author_agent_id || item.author_profile_id || key,
+      title: name,
+      subtitle: resultType === "agent" ? "AI Agent" : "用户",
+      snippet: item.bio || item.actor_disclosure || item.author_disclosure || "点击查看该作者相关帖子",
+      route: "home",
+      routeContext: name,
+      rankScore: Math.max(scoreSearchMatch(name, query) + 10, scoreSearchMatch(item.actor_handle, query)),
+    }));
+  });
+
+  const actorResults = [...actorMap.values()].filter((item) => item.rank_score > 0);
+
+  return [...postResults, ...actorResults]
+    .sort((left, right) => right.rank_score - left.rank_score)
+    .slice(0, 8);
+}
+
+async function fetchSearchResults(query) {
+  const trimmed = String(query ?? "").trim();
+  if (!trimmed) {
+    return [];
+  }
+
+  if (!configReady || !state.supabase) {
+    return buildLocalSearchResults(trimmed);
+  }
+
+  const { data, error } = await state.supabase.rpc("search_forum_content", {
+    p_query: trimmed,
+    p_limit: 8,
+  });
+
+  if (error) {
+    console.warn("search rpc failed, using local fallback", error.message);
+    return buildLocalSearchResults(trimmed);
+  }
+
+  const remoteResults = (data ?? [])
+    .map((item) => buildSearchResult({
+      resultType: item.result_type,
+      entityId: item.entity_id,
+      title: item.title,
+      subtitle: item.subtitle,
+      snippet: item.snippet,
+      route: item.route,
+      routeContext: item.route_context,
+      rankScore: Number(item.rank_score || 0),
+    }))
+    .filter((item) => item.title);
+
+  return remoteResults.length > 0 ? remoteResults : buildLocalSearchResults(trimmed);
+}
+
+function searchResultIcon(resultType) {
+  if (resultType === "post") return "📝";
+  if (resultType === "agent") return "🤖";
+  return "👤";
+}
+
+function searchResultMetaLabel(resultType) {
+  if (resultType === "post") return "帖子";
+  if (resultType === "agent") return "Agent";
+  return "用户";
+}
+
+function renderSearchText(text, query) {
+  const source = String(text ?? "");
+  if (!source) {
+    return "";
+  }
+
+  const escaped = escapeHtml(source);
+  const needle = String(query ?? "").trim();
+  if (!needle) {
+    return escaped;
+  }
+
+  const pattern = new RegExp(escapeRegExp(needle), "ig");
+  return escaped.replace(pattern, (match) => `<span class="search-highlight">${match}</span>`);
+}
+
+function updateSearchShellState() {
+  if (!els.globalSearchShell) {
+    return;
+  }
+
+  els.globalSearchShell.classList.toggle("has-value", Boolean(state.searchQuery));
+}
+
+function hideSearchDropdown() {
+  els.globalSearchDropdown?.classList.remove("show");
+}
+
+function renderSearchDropdown() {
+  if (!els.globalSearchDropdown || !els.globalSearchResults || !els.globalSearchStatus) {
+    return;
+  }
+
+  updateSearchShellState();
+
+  if (!state.searchQuery) {
+    hideSearchDropdown();
+    els.globalSearchStatus.textContent = "输入关键词，搜索帖子、用户和 Agent";
+    els.globalSearchResults.innerHTML = '<div class="search-empty">搜索结果会在这里展示。</div>';
+    return;
+  }
+
+  els.globalSearchDropdown.classList.add("show");
+
+  if (state.searchStatus === "loading") {
+    els.globalSearchStatus.textContent = `正在搜索 “${state.searchQuery}”...`;
+    els.globalSearchResults.innerHTML = '<div class="search-empty">正在连接后端搜索接口，请稍候。</div>';
+    return;
+  }
+
+  if (state.searchResults.length === 0) {
+    els.globalSearchStatus.textContent = `没有找到 “${state.searchQuery}” 的匹配内容`;
+    els.globalSearchResults.innerHTML = '<div class="search-empty">试试更短的关键词，或直接按回车筛选首页帖子。</div>';
+    return;
+  }
+
+  els.globalSearchStatus.textContent = `找到 ${state.searchResults.length} 条匹配结果`;
+  els.globalSearchResults.innerHTML = state.searchResults.map((item) => `
+    <button
+      class="search-result-item"
+      type="button"
+      data-search-type="${escapeAttribute(item.result_type)}"
+      data-search-id="${escapeAttribute(item.entity_id)}"
+      data-search-route="${escapeAttribute(item.route)}"
+      data-search-context="${escapeAttribute(item.route_context || "")}"
+      data-search-title="${escapeAttribute(item.title)}"
+    >
+      <span class="search-result-icon">${searchResultIcon(item.result_type)}</span>
+      <span class="search-result-main">
+        <span class="search-result-title">${renderSearchText(item.title, state.searchQuery)}</span>
+        <span class="search-result-subtitle">${renderSearchText(item.subtitle, state.searchQuery)}</span>
+        ${item.snippet ? `<span class="search-result-snippet">${renderSearchText(item.snippet, state.searchQuery)}</span>` : ""}
+      </span>
+      <span class="search-result-meta">${searchResultMetaLabel(item.result_type)}</span>
+    </button>
+  `).join("");
+}
+
+function executeSearch(query) {
+  const trimmed = String(query ?? "").trim();
+  state.searchQuery = trimmed;
+  updateSearchShellState();
+  window.clearTimeout(state.searchDebounceTimer);
+
+  if (!trimmed) {
+    state.searchResults = [];
+    state.searchStatus = "idle";
+    renderSearchDropdown();
+    return;
+  }
+
+  state.searchStatus = "loading";
+  renderSearchDropdown();
+  const requestToken = state.searchRequestToken + 1;
+  state.searchRequestToken = requestToken;
+
+  state.searchDebounceTimer = window.setTimeout(async () => {
+    const results = await fetchSearchResults(trimmed);
+    if (requestToken !== state.searchRequestToken) {
+      return;
+    }
+
+    state.searchResults = results;
+    state.searchStatus = results.length > 0 ? "done" : "empty";
+    renderSearchDropdown();
+  }, 220);
+}
+
+function applySearchToFeed(query) {
+  const trimmed = String(query ?? "").trim();
+  state.searchAppliedQuery = trimmed;
+  state.searchAppliedActor = null;
+  if (els.globalSearchInput) {
+    els.globalSearchInput.value = trimmed;
+  }
+  state.searchQuery = trimmed;
+  updateSearchShellState();
+  hideSearchDropdown();
+  navigate("home");
+  renderFeed();
+}
+
+function applyActorFilter(actorName, resultType = "profile") {
+  state.searchAppliedActor = { name: actorName, type: resultType };
+  state.searchAppliedQuery = "";
+  if (els.globalSearchInput) {
+    els.globalSearchInput.value = actorName;
+  }
+  state.searchQuery = actorName;
+  updateSearchShellState();
+  hideSearchDropdown();
+  navigate("home");
+  renderFeed();
+}
+
+function clearSearch({ clearApplied = true } = {}) {
+  state.searchQuery = "";
+  state.searchResults = [];
+  state.searchStatus = "idle";
+  window.clearTimeout(state.searchDebounceTimer);
+  if (clearApplied) {
+    state.searchAppliedQuery = "";
+    state.searchAppliedActor = null;
+    renderFeed();
+  }
+  if (els.globalSearchInput) {
+    els.globalSearchInput.value = "";
+  }
+  renderSearchDropdown();
+}
+
+function handleSearchResultSelection(button) {
+  if (!button) {
+    return;
+  }
+
+  const resultType = button.dataset.searchType;
+  const route = button.dataset.searchRoute;
+  const routeContext = button.dataset.searchContext;
+  const title = button.dataset.searchTitle;
+
+  if (resultType === "post" && route === "detail" && routeContext) {
+    hideSearchDropdown();
+    openDetailById(routeContext);
+    return;
+  }
+
+  applyActorFilter(title || routeContext, resultType);
+}
+
+function getVisibleFeedPosts(posts) {
+  let visiblePosts = [...posts];
+
+  if (state.searchAppliedActor?.name) {
+    const authorNeedle = normalizeSearchValue(state.searchAppliedActor.name);
+    visiblePosts = visiblePosts.filter((post) => normalizeSearchValue(post.author_name) === authorNeedle);
+  }
+
+  if (state.searchAppliedQuery) {
+    const query = normalizeSearchValue(state.searchAppliedQuery);
+    visiblePosts = visiblePosts.filter((post) => (
+      normalizeSearchValue(post.title).includes(query)
+      || normalizeSearchValue(post.content).includes(query)
+      || normalizeSearchValue(post.category).includes(query)
+      || normalizeSearchValue(post.author_name).includes(query)
+    ));
+  }
+
+  return visiblePosts;
+}
+
+function renderFeedSearchBanner(totalCount, visibleCount) {
+  if (!state.searchAppliedQuery && !state.searchAppliedActor?.name) {
+    return "";
+  }
+
+  const summary = state.searchAppliedActor?.name
+    ? `当前按作者 <strong>${escapeHtml(state.searchAppliedActor.name)}</strong> 筛选，共匹配 ${visibleCount} / ${totalCount} 条帖子`
+    : `当前搜索 <strong>${escapeHtml(state.searchAppliedQuery)}</strong>，共匹配 ${visibleCount} / ${totalCount} 条帖子`;
+
+  return `
+    <div class="feed-search-banner">
+      <div class="feed-search-copy">${summary}</div>
+      <button class="feed-search-reset" type="button" data-action="clear-feed-search">清除筛选</button>
+    </div>
+  `;
+}
+
+function renderFeedTabsHeader() {
+  return `
+    <div class="feed-header">
+      <h2>帖子流</h2>
+      <div class="feed-tabs">
+        <button class="feed-tab ${state.feedMode === "latest" ? "active" : ""}" data-feed-mode="latest">最新</button>
+        <button class="feed-tab ${state.feedMode === "support" ? "active" : ""}" data-feed-mode="support">参与支持率排行</button>
+        <button class="feed-tab ${state.feedMode === "non-support" ? "active" : ""}" data-feed-mode="non-support">不参与支持率排行</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderSupportOptOutInline() {
+  return `
+    <div class="post-market-inline post-market-inline-disabled">
+      <div class="post-market-inline-top">
+        <span class="post-market-inline-label">纯热度帖子</span>
+      </div>
+      <div class="support-opt-out-note">该帖子未参与支持率排行，仅参与最新信息流和纯热度排行榜统计。</div>
+    </div>
+  `;
+}
+
+function getUserPostMarketBets(postId) {
+  if (!postId) {
+    return [];
+  }
+
+  if (state.detailPostId === postId && state.detailUserBets.length > 0) {
+    return state.detailUserBets;
+  }
+
+  return state.userPostMarketBets.filter((item) => item.post_id === postId);
+}
+
+function isMarketSideBlocked(lockedSide, side) {
+  return lockedSide === "mixed" || (lockedSide && lockedSide !== side);
+}
+
+function getMarketSideStatusText(lockedSide) {
+  if (!lockedSide) {
+    return "";
+  }
+
+  return getOppositeSideLockMessage(lockedSide);
+}
+
+function renderFeedPostMarket(post) {
+  if (!supportsSupportBoard(post)) {
+    return renderSupportOptOutInline();
+  }
+
+  const marketType = Number(post.flamewar_probability || 0) >= 60 ? "flamewar" : "hot_24h";
+  const yesProbability = clampNumber(
+    Math.round(
+      marketType === "flamewar"
+        ? Number(post.flamewar_probability || 52)
+        : Number(post.hot_probability || 52),
+    ),
+    6,
+    94,
+  );
+  const noProbability = 100 - yesProbability;
+  const marketLabel = marketType === "flamewar" ? "引战站队" : "爆帖站队";
+  const marketDeadline = resolveMarketDeadline({ post, marketType });
+  const lockedSide = getMarketPositionSide(getUserPostMarketBets(post.id), marketType);
+  const ownPostLocked = isCurrentUserPostAuthor(post);
+  const sideStatusText = ownPostLocked ? getOwnPostMarketLockMessage() : getMarketSideStatusText(lockedSide);
+  const yesBlocked = ownPostLocked || isMarketSideBlocked(lockedSide, "yes");
+  const noBlocked = ownPostLocked || isMarketSideBlocked(lockedSide, "no");
+  const yesButtonText = lockedSide === "yes" ? "追加 YES · 50 oute" : "站队 YES · 50 oute";
+  const noButtonText = lockedSide === "no" ? "追加 NO · 50 oute" : "站队 NO · 50 oute";
+  const yesDisabledAttr = yesBlocked ? ` disabled title="${escapeAttribute(sideStatusText)}"` : "";
+  const noDisabledAttr = noBlocked ? ` disabled title="${escapeAttribute(sideStatusText)}"` : "";
+
+  return `
+    <div class="post-market-inline" data-countdown-key="feed-${escapeAttribute(post.id)}" data-market-deadline="${escapeAttribute(marketDeadline || "")}">
+      <div class="post-market-inline-top">
+        <span class="post-market-inline-label">${marketLabel}</span>
+        ${marketType === "flamewar" ? '<span class="prediction-odds-chip">YES = 会引战</span>' : ""}
+      </div>
+      ${renderCountdownMarkup({ compact: true })}
+      <div class="post-market-inline-track">
+        <div class="post-market-inline-fill yes" style="width:${yesProbability}%">YES ${yesProbability}%</div>
+        <div class="post-market-inline-fill no" style="width:${noProbability}%">NO ${noProbability}%</div>
+      </div>
+      <div class="post-market-inline-actions">
+        <button class="post-market-inline-btn primary" type="button" data-action="feed-post-side" data-post-id="${post.id}" data-market-type="${marketType}" data-side="yes" data-stake="50"${yesDisabledAttr}>${yesButtonText}</button>
+        <button class="post-market-inline-btn" type="button" data-action="feed-post-side" data-post-id="${post.id}" data-market-type="${marketType}" data-side="no" data-stake="50"${noDisabledAttr}>${noButtonText}</button>
+      </div>
+      <div class="post-market-inline-status" id="feedPostStatus-${post.id}">${escapeHtml(sideStatusText)}</div>
+    </div>
+  `;
+}
+
+async function loadHomepageSupportBoardData() {
+  const snapshot = await loadSupportBoardSnapshot({
+    supabase: state.supabase,
+    predictionCards: state.predictionCards.filter((item) => {
+      if (typeof item?.participates_in_support_board === "boolean") {
+        return item.participates_in_support_board;
+      }
+
+      const matchedPost = state.posts.find((post) => post.id === item?.post_id);
+      return supportsSupportBoard(matchedPost);
+    }),
+    clampNumber,
+  });
+
+  state.supportBoardItems = snapshot.items;
+  state.supportBoardSeriesByKey = snapshot.seriesByKey;
+  state.supportBoardDataSource = snapshot.dataSource;
+}
+
+async function loadSupportBoardSeriesMap(items) {
+  const seriesMap = {};
+
+  if (!state.supabase || items.length === 0) {
+    return seriesMap;
+  }
+
+  const results = await Promise.allSettled(
+    items.map((item) =>
+      state.supabase.rpc("get_post_market_series", {
+        p_post_id: item.post_id,
+        p_market_type: item.market_type || SUPPORT_BOARD_DEFAULTS.marketType,
+        p_window_minutes: SUPPORT_BOARD_DEFAULTS.windowMinutes,
+        p_bucket_minutes: SUPPORT_BOARD_DEFAULTS.bucketMinutes,
+      })),
+  );
+
+  items.forEach((item, index) => {
+    const key = getSupportBoardSeriesKey(item.post_id, item.market_type);
+    const result = results[index];
+
+    if (result?.status === "fulfilled" && !result.value.error) {
+      const rows = normalizeSupportBoardSeriesRows(result.value.data ?? []);
+      seriesMap[key] = rows.length > 0 ? rows : createFallbackSupportSeries(item);
+      return;
+    }
+
+    seriesMap[key] = createFallbackSupportSeries(item);
+  });
+
+  return seriesMap;
+}
+
+function normalizeSupportBoardSummaryRow(row, index = 0) {
+  if (!row?.post_id) {
+    return null;
+  }
+
+  const yesRate = clampNumber(Number(row.yes_rate ?? 50), 0, 100);
+
+  return {
+    rank_position: Number(row.rank_position ?? index + 1),
+    post_id: row.post_id,
+    post_title: row.post_title || "Untitled",
+    post_category: row.post_category || "",
+    post_created_at: row.post_created_at || null,
+    author_name: row.author_name || "Arena Pulse",
+    author_badge: row.author_badge || "",
+    author_disclosure: row.author_disclosure || "",
+    post_author_is_ai_agent: Boolean(row.post_author_is_ai_agent),
+    market_type: row.market_type || SUPPORT_BOARD_DEFAULTS.marketType,
+    market_label: row.market_label || "Support Rate",
+    yes_rate: yesRate,
+    yes_amount_total: Number(row.yes_amount_total ?? 0),
+    no_amount_total: Number(row.no_amount_total ?? 0),
+    total_amount_total: Number(row.total_amount_total ?? 0),
+    sample_count_total: Number(row.sample_count_total ?? 0),
+    latest_bucket_ts: row.latest_bucket_ts || null,
+    latest_bet_at: row.latest_bet_at || null,
+    board_score: Number(row.board_score ?? yesRate),
+    headline: row.headline || "",
+  };
+}
+
+function normalizeSupportBoardSeriesRows(rows) {
+  return (rows ?? [])
+    .map((row) => ({
+      bucket_ts: row.bucket_ts,
+      yes_rate: clampNumber(Number(row.yes_rate ?? 50), 0, 100),
+      yes_amount_bucket: Number(row.yes_amount_bucket ?? 0),
+      no_amount_bucket: Number(row.no_amount_bucket ?? 0),
+      total_amount_bucket: Number(row.total_amount_bucket ?? 0),
+      yes_amount_cumulative: Number(row.yes_amount_cumulative ?? 0),
+      no_amount_cumulative: Number(row.no_amount_cumulative ?? 0),
+      total_amount_cumulative: Number(row.total_amount_cumulative ?? 0),
+      sample_count_bucket: Number(row.sample_count_bucket ?? 0),
+      sample_count_cumulative: Number(row.sample_count_cumulative ?? 0),
+    }))
+    .filter((row) => row.bucket_ts);
+}
+
+function buildFallbackSupportBoardItems(predictionCards) {
+  return (predictionCards ?? [])
+    .slice(0, SUPPORT_BOARD_DEFAULTS.limit)
+    .map((item, index) => ({
+      rank_position: index + 1,
+      post_id: item.post_id,
+      post_title: item.post_title || item.headline || "Untitled",
+      post_category: item.post_category || "",
+      post_created_at: item.created_at || null,
+      author_name: item.predictor_name || "Arena Pulse",
+      author_badge: item.predictor_badge || "",
+      author_disclosure: item.predictor_disclosure || "",
+      post_author_is_ai_agent: Boolean(item.is_ai_agent),
+      market_type: item.prediction_type || SUPPORT_BOARD_DEFAULTS.marketType,
+      market_label: item.prediction_label || "Support Rate",
+      yes_rate: clampNumber(Number(item.probability ?? 50), 0, 100),
+      yes_amount_total: 0,
+      no_amount_total: 0,
+      total_amount_total: 0,
+      sample_count_total: 0,
+      latest_bucket_ts: item.created_at || null,
+      latest_bet_at: item.created_at || null,
+      board_score: Number(item.probability ?? 50),
+      headline: item.headline || "",
+    }))
+    .filter((item) => item.post_id);
+}
+
+function buildFallbackSupportBoardSeriesMap(items) {
+  return Object.fromEntries(
+    items.map((item) => [getSupportBoardSeriesKey(item.post_id, item.market_type), createFallbackSupportSeries(item)]),
+  );
+}
+
+function createFallbackSupportSeries(item) {
+  const endTime = item.latest_bucket_ts ? new Date(item.latest_bucket_ts).getTime() : Date.now();
+  const rate = clampNumber(Number(item.yes_rate ?? 50), 0, 100);
+
+  return Array.from({ length: 6 }, (_value, index) => ({
+    bucket_ts: new Date(endTime - (5 - index) * SUPPORT_BOARD_DEFAULTS.bucketMinutes * 60000).toISOString(),
+    yes_rate: rate,
+    yes_amount_bucket: 0,
+    no_amount_bucket: 0,
+    total_amount_bucket: 0,
+    yes_amount_cumulative: Number(item.yes_amount_total ?? 0),
+    no_amount_cumulative: Number(item.no_amount_total ?? 0),
+    total_amount_cumulative: Number(item.total_amount_total ?? 0),
+    sample_count_bucket: 0,
+    sample_count_cumulative: Number(item.sample_count_total ?? 0),
+  }));
+}
+
+function getSupportBoardSeriesKey(postId, marketType = SUPPORT_BOARD_DEFAULTS.marketType) {
+  return `${postId}:${marketType}`;
+}
+
+function getSupportBoardSeries(item) {
+  return state.supportBoardSeriesByKey[getSupportBoardSeriesKey(item.post_id, item.market_type)] ?? [];
+}
+
+async function loadLeaderboardData({ render = true, mode = "replace", reason = "data-load" } = {}) {
   const chaosResult = await state.supabase
     .from("weekly_chaos_rankings")
     .select("*")
@@ -210,7 +1682,13 @@ async function loadLeaderboardData() {
     state.chaosPosts = chaosResult.data ?? [];
   }
 
-  renderLeaderboard();
+  if (state.chaosPosts.length === 0) {
+    state.chaosPosts = [...MOCK_CHAOS_POSTS];
+  }
+
+  if (render) {
+    renderLeaderboard({ mode, reason });
+  }
 }
 
 async function loadDetailData(postId) {
@@ -237,7 +1715,7 @@ async function loadDetailData(postId) {
 
   state.currentDetailPost = post ?? null;
 
-  const [commentsResult, predictionsResult] = await Promise.all([
+  const [commentsResult, predictionsResult, userBetsResult] = await Promise.all([
     state.supabase
       .from("feed_comments")
       .select("*")
@@ -248,13 +1726,148 @@ async function loadDetailData(postId) {
       .select("*")
       .eq("post_id", postId)
       .order("created_at", { ascending: false }),
+    state.user
+      ? state.supabase
+        .from("post_market_bets")
+        .select("id, post_id, market_type, side, amount, odds_snapshot, payout_amount, payout_claimed, settled_at, settled_side, created_at")
+        .eq("post_id", postId)
+        .eq("profile_id", state.user.id)
+        .order("created_at", { ascending: false })
+      : Promise.resolve({ error: null, data: [] }),
   ]);
 
   state.detailComments = commentsResult.error ? [] : commentsResult.data ?? [];
   state.detailPredictions = predictionsResult.error ? [] : predictionsResult.data ?? [];
+  state.detailUserBets = userBetsResult?.error ? [] : userBetsResult?.data ?? [];
+  await loadDetailSupportBoardTrend();
 
   await syncCurrentLikeState(postId);
   renderDetail();
+  void refreshDetailLensAgentInsight();
+}
+
+async function loadDetailSupportBoardTrend() {
+  const post = state.currentDetailPost;
+  const marketType = getPrimaryDetailMarketType(post, state.detailPredictions);
+
+  state.detailSupportBoardItem = null;
+  state.detailSupportBoardSeries = [];
+  state.detailSupportBoardMarketType = marketType;
+  state.detailSupportBoardDataSource = "unknown";
+
+  if (!post || !supportsSupportBoard(post)) {
+    return;
+  }
+
+  const trend = await loadSupportBoardPostTrend({
+    supabase: state.supabase,
+    post,
+    marketType,
+    clampNumber,
+  });
+
+  state.detailSupportBoardItem = trend.item;
+  state.detailSupportBoardSeries = trend.series;
+  state.detailSupportBoardDataSource = trend.dataSource;
+}
+
+function getPrimaryDetailMarketType(post, predictions = []) {
+  const roastPrediction = predictions.find((item) => item.prediction_type === "get_roasted");
+  const hotPrediction = predictions.find((item) => item.prediction_type === "hot_24h");
+  const flamePrediction = predictions.find((item) => item.prediction_type === "flamewar");
+  return (hotPrediction ?? flamePrediction ?? roastPrediction)?.prediction_type
+    ?? post?.market_type
+    ?? SUPPORT_BOARD_DEFAULTS.marketType;
+}
+
+function readLensAgentInsight(post, { supportBoardSignal = null } = {}) {
+  const fallbackInsight = buildLensAgentInsight(post, {
+    supportBoardSignal,
+  });
+
+  return state.lensAgentClient?.getCached(post) ?? fallbackInsight;
+}
+
+async function refreshLensAgentInsight({ post, supportBoardSignal = null } = {}) {
+  if (!state.lensAgentClient || !post) {
+    return null;
+  }
+
+  if (state.lensAgentClient.getCached(post)) {
+    return null;
+  }
+
+  return state.lensAgentClient.loadInsight({
+    post,
+    supportBoardSignal,
+    fallbackInsight: buildLensAgentInsight(post, {
+      supportBoardSignal,
+    }),
+  });
+}
+
+function scheduleFeedLensAgentRefresh(posts = []) {
+  if (!state.lensAgentClient || posts.length === 0) {
+    return;
+  }
+
+  state.lensAgentFeedRefreshToken += 1;
+  const token = state.lensAgentFeedRefreshToken;
+
+  if (state.lensAgentFeedRefreshTimer) {
+    window.clearTimeout(state.lensAgentFeedRefreshTimer);
+  }
+
+  state.lensAgentFeedRefreshTimer = window.setTimeout(() => {
+    void refreshFeedLensAgentInsights(posts, token);
+  }, LENS_AGENT_FEED_REFRESH_DELAY_MS);
+}
+
+async function refreshFeedLensAgentInsights(posts, token) {
+  const candidates = posts
+    .filter((post) => post?.id && !state.lensAgentClient?.getCached(post))
+    .slice(0, LENS_AGENT_FEED_BATCH_LIMIT);
+
+  for (const post of candidates) {
+    if (token !== state.lensAgentFeedRefreshToken) {
+      return;
+    }
+
+    const result = await refreshLensAgentInsight({
+      post,
+      supportBoardSignal: findSupportBoardSignal(state.supportBoardItems, post.id),
+    });
+
+    if (result?.source === "remote" && token === state.lensAgentFeedRefreshToken) {
+      renderFeed({ scheduleLensRefresh: false });
+    }
+
+    await wait(LENS_AGENT_FEED_REFRESH_STEP_MS);
+  }
+}
+
+async function refreshDetailLensAgentInsight() {
+  const post = state.currentDetailPost;
+  if (!post) {
+    return;
+  }
+
+  const postId = post.id;
+  const marketType = getPrimaryDetailMarketType(post, state.detailPredictions);
+  const result = await refreshLensAgentInsight({
+    post,
+    supportBoardSignal: findSupportBoardSignal(state.supportBoardItems, post.id, marketType),
+  });
+
+  if (result?.source === "remote" && state.currentDetailPost?.id === postId) {
+    renderDetailOdds();
+  }
+}
+
+function wait(ms) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
 }
 
 async function syncCurrentLikeState(postId) {
@@ -280,6 +1893,7 @@ async function syncCurrentLikeState(postId) {
 function initGlobals() {
   window.navigate = navigate;
   window.toggleAuth = toggleAuth;
+  window.toggleUserDropdown = toggleUserDropdown;
   window.toggleLbRow = toggleLbRow;
   window.filterActivity = filterActivity;
   window.toggleActivityCard = toggleActivityCard;
@@ -289,18 +1903,47 @@ function initGlobals() {
   window.showUserPreview = showUserPreview;
   window.hideUserPreview = hideUserPreview;
   window.openDetailById = openDetailById;
+  window.doLogout = doLogout;
+  window.setLiveSupportBoardFilter = setLiveSupportBoardFilter;
+  window.toggleLiveSupportBoardItem = toggleLiveSupportBoardItem;
+  window.setSupportBoardFilter = setLiveSupportBoardFilter;
+  window.toggleSupportBoardItem = toggleLiveSupportBoardItem;
+  window.openCookieModal = openCookieModal;
+  window.closeCookieModal = closeCookieModal;
+  window.saveCookieSettings = saveCookieSettings;
+  window.triggerLikeDemo = triggerLikeDemo;
+  window.triggerCommentDemo = triggerCommentDemo;
+  window.triggerShareDemo = triggerShareDemo;
+  window.triggerBookmarkDemo = triggerBookmarkDemo;
+  window.triggerBetDemo = triggerBetDemo;
+  window.submitPostBet = submitPostBet;
 }
 
 function initStaticInteractions() {
-  document.querySelectorAll(".feed-tabs .feed-tab").forEach((button) => {
-    button.addEventListener("click", () => {
-      document.querySelectorAll(".feed-tabs .feed-tab").forEach((item) => item.classList.remove("active"));
-      button.classList.add("active");
+  initMotionLab();
 
-      const label = button.textContent.trim();
-      state.feedMode = label === "最新" ? "latest" : label === "最热" ? "hot" : "odds";
-      renderFeed();
+  document.addEventListener("click", (event) => {
+    if (userMenuWrap && !userMenuWrap.contains(event.target)) {
+      userDropdown?.classList.remove("show");
+    }
+
+    if (els.globalSearchShell && !els.globalSearchShell.contains(event.target)) {
+      hideSearchDropdown();
+    }
+  });
+
+  els.feedPosts?.addEventListener("click", (event) => {
+    const button = event.target.closest(".feed-tabs .feed-tab");
+    if (!button) {
+      return;
+    }
+
+    const mode = button.dataset.feedMode || "latest";
+    document.querySelectorAll(".feed-tabs .feed-tab").forEach((item) => {
+      item.classList.toggle("active", item === button);
     });
+    state.feedMode = mode;
+    renderFeed();
   });
 
   document.querySelectorAll(".lb-tabs .lb-tab").forEach((button) => {
@@ -308,7 +1951,7 @@ function initStaticInteractions() {
       document.querySelectorAll(".lb-tabs .lb-tab").forEach((item) => item.classList.remove("active"));
       button.classList.add("active");
       state.leaderboardTab = button.textContent.trim();
-      renderLeaderboard();
+      renderLeaderboard({ mode: "replace", reason: "tab-change" });
     });
   });
 
@@ -317,7 +1960,13 @@ function initStaticInteractions() {
       document.querySelectorAll(".lb-time-tabs .lb-time-tab").forEach((item) => item.classList.remove("active"));
       button.classList.add("active");
       state.leaderboardTime = button.textContent.trim();
-      renderLeaderboard();
+      renderLeaderboard({ mode: "replace", reason: "time-change" });
+    });
+  });
+
+  els.profileTabs.forEach((button, index) => {
+    button.addEventListener("click", () => {
+      setProfileTab(["posts", "comments", "bookmarks"][index] ?? "posts");
     });
   });
 
@@ -344,11 +1993,559 @@ function initStaticInteractions() {
       : "点击或拖拽上传图片";
   });
 
+  els.createSupportToggle?.addEventListener("change", () => {
+    syncCreateSupportControls({ preserveValue: true });
+  });
+
+  els.createSupportDeadlineInput?.addEventListener("input", () => {
+    syncCreateSupportControls({ preserveValue: true });
+  });
+
   els.modal?.addEventListener("click", (event) => {
     if (event.target === els.modal) {
       closeActivityModal();
     }
   });
+
+  els.globalSearchInput?.addEventListener("input", (event) => {
+    executeSearch(event.target.value);
+  });
+
+  els.globalSearchInput?.addEventListener("focus", () => {
+    if (state.searchQuery) {
+      renderSearchDropdown();
+    }
+  });
+
+  els.globalSearchInput?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      applySearchToFeed(els.globalSearchInput.value);
+      return;
+    }
+
+    if (event.key === "Escape") {
+      hideSearchDropdown();
+    }
+  });
+
+  els.globalSearchClear?.addEventListener("click", () => {
+    clearSearch({ clearApplied: true });
+  });
+
+  els.globalSearchApply?.addEventListener("click", () => {
+    applySearchToFeed(state.searchQuery || els.globalSearchInput?.value || "");
+  });
+
+  els.globalSearchResults?.addEventListener("click", (event) => {
+    const button = event.target.closest(".search-result-item");
+    if (button) {
+      handleSearchResultSelection(button);
+    }
+  });
+
+  els.cookieSwitches.forEach((toggle) => {
+    toggle.addEventListener("click", () => {
+      toggleCookiePreference(toggle.dataset.cookie);
+    });
+  });
+
+  els.cookieModal?.addEventListener("click", (event) => {
+    if (event.target === els.cookieModal) {
+      closeCookieModal();
+    }
+  });
+}
+
+function initMotionLab() {
+  if (!motionEls.root) {
+    return;
+  }
+
+  renderMotionLab();
+
+  motionEls.likeButton?.addEventListener("click", () => {
+    triggerLikeDemo();
+  });
+
+  motionEls.bookmarkButton?.addEventListener("click", () => {
+    triggerBookmarkDemo();
+  });
+
+  motionEls.shareButton?.addEventListener("click", () => {
+    void triggerShareDemo();
+  });
+
+  motionEls.commentPulseButton?.addEventListener("click", () => {
+    focusMotionCommentBox(true);
+  });
+
+  motionEls.commentSend?.addEventListener("click", () => {
+    triggerCommentDemo();
+  });
+
+  motionEls.commentInput?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      triggerCommentDemo();
+    }
+  });
+
+  motionEls.betYesButton?.addEventListener("click", () => {
+    triggerBetDemo("yes");
+  });
+
+  motionEls.betNoButton?.addEventListener("click", () => {
+    triggerBetDemo("no");
+  });
+}
+
+function renderMotionLab() {
+  if (!motionEls.root) {
+    return;
+  }
+
+  const no = 100 - motionDemoState.yes;
+
+  if (motionEls.likeCount) {
+    motionEls.likeCount.textContent = formatCompact(motionDemoState.likes);
+  }
+  motionEls.likeButton?.classList.toggle("is-active", motionDemoState.liked);
+
+  if (motionEls.bookmarkCount) {
+    motionEls.bookmarkCount.textContent = formatCompact(motionDemoState.bookmarks);
+  }
+  motionEls.bookmarkButton?.classList.toggle("is-active", motionDemoState.bookmarked);
+
+  if (motionEls.shareCount) {
+    motionEls.shareCount.textContent = formatCompact(motionDemoState.shares);
+  }
+
+  if (motionEls.commentCount) {
+    motionEls.commentCount.textContent = formatCompact(motionDemoState.comments);
+  }
+
+  if (motionEls.balance) {
+motionEls.balance.textContent = `${motionDemoState.balance} oute`;
+  }
+
+  if (motionEls.combo) {
+    motionEls.combo.textContent = `x${motionDemoState.combo}`;
+  }
+
+  if (motionEls.yesFill) {
+    motionEls.yesFill.style.width = `${motionDemoState.yes}%`;
+    motionEls.yesFill.textContent = `YES ${motionDemoState.yes}%`;
+  }
+
+  if (motionEls.noFill) {
+    motionEls.noFill.style.width = `${no}%`;
+    motionEls.noFill.textContent = `NO ${no}%`;
+  }
+
+  if (motionEls.oddsMeta) {
+    motionEls.oddsMeta.textContent = motionDemoState.combo > 0 ? "Live swing" : "Live";
+  }
+
+  renderMotionFeed();
+  renderMotionComments();
+}
+
+function renderMotionFeed() {
+  if (!motionEls.feed) {
+    return;
+  }
+
+  motionEls.feed.innerHTML = motionDemoState.feed
+    .slice(0, 4)
+    .map((item) => `
+      <div class="motion-feed-item ${item.tone === "bot" ? "is-bot" : ""}">
+        <strong>${escapeHtml(item.actor)}</strong>
+        <p>${escapeHtml(item.text)}</p>
+      </div>
+    `)
+    .join("");
+
+  if (els.profilePostCount) {
+    els.profilePostCount.textContent = String(data.length);
+  }
+}
+
+function renderMotionComments() {
+  if (!motionEls.commentStream) {
+    return;
+  }
+
+  motionEls.commentStream.innerHTML = motionDemoState.commentStream
+    .slice(0, 4)
+    .map((item) => `
+      <div class="motion-comment-item">
+        <strong>${escapeHtml(item.actor)}</strong>
+        <p>${escapeHtml(item.text)}</p>
+      </div>
+    `)
+    .join("");
+}
+
+function focusMotionCommentBox(withPulse = false) {
+  motionEls.commentInput?.focus();
+
+  if (withPulse) {
+    pulseElement(motionEls.commentPulseButton);
+    showMotionToast("Comment box ready");
+  }
+}
+
+function triggerLikeDemo(targetButton = motionEls.likeButton, options = {}) {
+  const { updateDemoState = targetButton === motionEls.likeButton, forceActive = null, toast } = options;
+  const nextActive = typeof forceActive === "boolean"
+    ? forceActive
+    : updateDemoState
+      ? !motionDemoState.liked
+      : true;
+
+  if (updateDemoState) {
+    motionDemoState.liked = nextActive;
+    motionDemoState.likes = Math.max(0, motionDemoState.likes + (nextActive ? 1 : -1));
+    pushMotionFeed("You", nextActive ? "Liked the interaction demo post." : "Removed a like from the interaction demo post.");
+    renderMotionLab();
+  }
+
+  pulseElement(targetButton, targetButton?.classList.contains("action-btn") ? "is-liked-burst" : "is-popping");
+
+  if (nextActive) {
+    spawnBurstParticles(targetButton, {
+      className: "is-heart",
+    glyphs: ["+", "+", "+1", "*"],
+      count: 8,
+      spreadX: 110,
+      minY: -120,
+      maxY: -45,
+    });
+  }
+
+  if (toast) {
+    showMotionToast(toast);
+  } else if (updateDemoState) {
+    showMotionToast(nextActive ? "Liked" : "Like removed");
+  }
+}
+
+function triggerBookmarkDemo(targetButton = motionEls.bookmarkButton, options = {}) {
+  const { updateDemoState = targetButton === motionEls.bookmarkButton } = options;
+  const nextActive = updateDemoState ? !motionDemoState.bookmarked : true;
+
+  if (updateDemoState) {
+    motionDemoState.bookmarked = nextActive;
+    motionDemoState.bookmarks = Math.max(0, motionDemoState.bookmarks + (nextActive ? 1 : -1));
+    pushMotionFeed("You", nextActive ? "Saved the post for later." : "Removed the post from bookmarks.");
+    renderMotionLab();
+  }
+
+  pulseElement(targetButton);
+  spawnBurstParticles(targetButton, {
+    className: "is-bookmark",
+    glyphs: ["+", "+", "*"],
+    count: 7,
+    spreadX: 100,
+    minY: -105,
+    maxY: -35,
+  });
+  showMotionToast(nextActive ? "Saved" : "Bookmark removed");
+}
+
+async function copyTextToClipboard(text) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return true;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.select();
+
+  try {
+    return document.execCommand("copy");
+  } finally {
+    textarea.remove();
+  }
+}
+
+async function triggerShareDemo(targetButton = motionEls.shareButton, options = {}) {
+  const {
+    updateDemoState = targetButton === motionEls.shareButton,
+    shareText = window.location.href,
+    toast = "Share link copied",
+  } = options;
+
+  if (updateDemoState) {
+    motionDemoState.shares += 1;
+    pushMotionFeed("You", "Shared the demo card to another channel.");
+    renderMotionLab();
+  }
+
+  pulseElement(targetButton);
+  spawnBurstParticles(targetButton, {
+    className: "is-share",
+    glyphs: ["*", "*", "*", "*"],
+    count: 7,
+    spreadX: 125,
+    minY: -95,
+    maxY: -30,
+  });
+
+  if (shareText) {
+    try {
+      await copyTextToClipboard(shareText);
+    } catch (_error) {
+      // Ignore clipboard failures in the demo.
+    }
+  }
+
+  showMotionToast(toast);
+}
+
+function triggerCommentDemo(payload) {
+  const text = typeof payload === "string" ? payload.trim() : motionEls.commentInput?.value.trim();
+
+  if (!text) {
+    focusMotionCommentBox(true);
+    return;
+  }
+
+  motionDemoState.comments += 1;
+  motionDemoState.commentStream.unshift({ actor: "You", text });
+  motionDemoState.commentStream = motionDemoState.commentStream.slice(0, 4);
+  pushMotionFeed("You", `Commented: ${shortMotionText(text, 44)}`);
+  renderMotionLab();
+
+  if (motionEls.commentInput) {
+    motionEls.commentInput.value = "";
+  }
+
+  pulseElement(motionEls.commentSend ?? motionEls.commentPulseButton);
+  spawnBurstParticles(motionEls.commentSend ?? motionEls.commentPulseButton, {
+    className: "is-share",
+    glyphs: ["...", "+1", "*"],
+    count: 6,
+    spreadX: 90,
+    minY: -95,
+    maxY: -28,
+    sizeMin: 11,
+    sizeMax: 15,
+  });
+  showMotionToast("Comment sent");
+}
+
+function triggerBetDemo(side) {
+  const button = side === "yes" ? motionEls.betYesButton : motionEls.betNoButton;
+
+  motionDemoState.balance = Math.max(0, motionDemoState.balance - 50);
+  motionDemoState.combo += 1;
+  motionDemoState.yes = clampNumber(motionDemoState.yes + (side === "yes" ? 4 : -4), 12, 88);
+  pushMotionFeed("You", `Backed ${side.toUpperCase()} with 50 oute.`);
+  renderMotionLab();
+
+  pulseElement(button);
+  spawnBurstParticles(button, {
+    className: "is-coin",
+    glyphs: ["oute", "oute", "oute", "+"],
+    count: 9,
+    spreadX: 240,
+    minY: -220,
+    maxY: -70,
+    sizeMin: 12,
+    sizeMax: 14,
+    endScale: 0.74,
+  });
+  triggerOuteRainBurst();
+  showMotionToast(`+50 oute on ${side.toUpperCase()}`);
+
+  window.clearTimeout(motionDemoState.botTimer);
+  motionDemoState.botTimer = window.setTimeout(() => {
+    const botSide = side === "yes" ? "yes" : Math.random() > 0.55 ? "yes" : "no";
+    motionDemoState.yes = clampNumber(motionDemoState.yes + (botSide === "yes" ? 2 : -2), 12, 88);
+  pushMotionFeed("AI_Bot_23", `Followed the ${botSide.toUpperCase()} side with +120 oute.`, "bot");
+    renderMotionLab();
+    showMotionToast(`AI_Bot_23 followed ${botSide.toUpperCase()}`);
+  }, 950);
+}
+
+function pushMotionFeed(actor, text, tone = "system") {
+  motionDemoState.feed.unshift({ actor, text, tone });
+  motionDemoState.feed = motionDemoState.feed.slice(0, 4);
+}
+
+function showMotionToast(message) {
+  if (!motionEls.toast) {
+    return;
+  }
+
+  motionEls.toast.textContent = message;
+  motionEls.toast.classList.add("show");
+
+  window.clearTimeout(motionDemoState.toastTimer);
+  motionDemoState.toastTimer = window.setTimeout(() => {
+    motionEls.toast?.classList.remove("show");
+  }, 1400);
+}
+
+function pulseElement(element, className = "is-popping") {
+  if (!element) {
+    return;
+  }
+
+  element.classList.remove(className);
+  void element.offsetWidth;
+  element.classList.add(className);
+
+  window.setTimeout(() => {
+    element.classList.remove(className);
+  }, 650);
+}
+
+function spawnBurstParticles(target, options = {}) {
+  if (!motionLayer || !target) {
+    return;
+  }
+
+  const rect = target.getBoundingClientRect();
+  const originX = rect.left + (rect.width / 2);
+  const originY = rect.top + (rect.height / 2);
+  const glyphs = options.glyphs ?? ["*"];
+  const count = options.count ?? 6;
+  const spreadX = options.spreadX ?? 90;
+  const minY = options.minY ?? -90;
+  const maxY = options.maxY ?? -25;
+  const sizeMin = options.sizeMin ?? 12;
+  const sizeMax = options.sizeMax ?? 17;
+  const endScale = options.endScale ?? 0.86;
+
+  for (let index = 0; index < count; index += 1) {
+    const particle = document.createElement("span");
+    const glyph = glyphs[index % glyphs.length];
+    particle.className = `motion-particle ${options.className ?? ""}`.trim();
+    particle.textContent = glyph;
+    particle.style.left = `${originX}px`;
+    particle.style.top = `${originY}px`;
+    particle.style.setProperty("--dx", `${randomBetween(-spreadX, spreadX)}px`);
+    particle.style.setProperty("--dy", `${randomBetween(minY, maxY)}px`);
+    particle.style.setProperty("--rotate", `${randomBetween(-160, 160)}deg`);
+    particle.style.setProperty("--delay", `${index * 28}ms`);
+    particle.style.setProperty("--duration", `${randomBetween(0.72, 1.04).toFixed(2)}s`);
+    particle.style.setProperty("--size", `${randomBetween(sizeMin, sizeMax)}px`);
+    particle.style.setProperty("--end-scale", String(endScale));
+    motionLayer.appendChild(particle);
+    particle.addEventListener("animationend", () => particle.remove(), { once: true });
+  }
+}
+
+function prefersReducedMotion() {
+  return window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ?? false;
+}
+
+function initOuteRain() {
+  window.setTimeout(() => {
+    triggerOuteRain();
+  }, 3450);
+}
+
+function triggerOuteRainBurst() {
+  triggerOuteRain({
+    count: window.innerWidth <= OUTE_RAIN_DEFAULTS.mobileBreakpoint ? 10 : 14,
+    minDuration: 2.9,
+    maxDuration: 4.6,
+    maxDelay: 0.55,
+    minSize: 20,
+    maxSize: 32,
+    minDrift: -24,
+    maxDrift: 24,
+  });
+}
+
+function triggerSupportBoardUpdateRain() {
+  triggerOuteRain({
+    count: window.innerWidth <= OUTE_RAIN_DEFAULTS.mobileBreakpoint ? 12 : 18,
+    minDuration: 3.2,
+    maxDuration: 5.2,
+    maxDelay: 0.75,
+    minSize: 18,
+    maxSize: 30,
+    minDrift: -28,
+    maxDrift: 28,
+    minOpacity: 0.64,
+    maxOpacity: 0.92,
+  });
+}
+
+function triggerOuteRain(options = {}) {
+  if (!motionLayer || !shouldStartOuteRain({
+    reducedMotion: prefersReducedMotion(),
+    hidden: document.hidden,
+  })) {
+    return;
+  }
+
+  const rainOptions = { ...OUTE_RAIN_DEFAULTS, ...options };
+  const drops = buildOuteRainDrops({
+    viewportWidth: window.innerWidth,
+    random: Math.random,
+    options: rainOptions,
+  });
+  const fragment = document.createDocumentFragment();
+
+  for (const drop of drops) {
+    const dropEl = document.createElement("span");
+    dropEl.className = "oute-rain-drop";
+    dropEl.setAttribute("aria-hidden", "true");
+    dropEl.style.setProperty("--left", `${drop.leftPercent}%`);
+    dropEl.style.setProperty("--size", `${drop.size}px`);
+    dropEl.style.setProperty("--duration", `${drop.duration}s`);
+    dropEl.style.setProperty("--delay", `${drop.delay}s`);
+    dropEl.style.setProperty("--drift", `${drop.drift}px`);
+    dropEl.style.setProperty("--spin", `${drop.spin}deg`);
+    dropEl.style.setProperty("--drop-opacity", String(drop.opacity));
+
+    const img = document.createElement("img");
+    img.src = rainOptions.iconSrc;
+    img.alt = "";
+    dropEl.appendChild(img);
+
+    dropEl.addEventListener("animationend", () => dropEl.remove(), { once: true });
+    window.setTimeout(() => dropEl.remove(), (drop.duration + drop.delay + 0.4) * 1000);
+    fragment.appendChild(dropEl);
+  }
+
+  motionLayer.appendChild(fragment);
+}
+
+function getSupportBoardRainSignature() {
+  return buildSupportBoardRainSignature(state.supportBoardItems);
+}
+
+function rememberSupportBoardRainSignature() {
+  state.supportBoardRainSignature = getSupportBoardRainSignature();
+}
+
+function shortMotionText(value, maxLength) {
+  const text = String(value ?? "").trim();
+  if (text.length <= maxLength) {
+    return text;
+  }
+
+  return `${text.slice(0, maxLength - 1)}...`;
+}
+
+function clampNumber(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function randomBetween(min, max) {
+  return min + Math.random() * (max - min);
 }
 
 function initSplash() {
@@ -406,19 +2603,104 @@ function initCursorGlow() {
   animate();
 }
 
+function initProjectSubmissionCountdown() {
+  const root = els.projectSubmissionCountdown;
+  const valueEl = els.projectSubmissionCountdownValue;
+  const statusEl = els.projectSubmissionCountdownStatus;
+
+  if (!root || !valueEl) {
+    return;
+  }
+
+  const config = state.projectSubmissionDeadlineConfig ?? getFallbackProjectSubmissionDeadlineConfig();
+  syncProjectSubmissionDeadlineCopy(config);
+
+  const applySnapshot = () => {
+    const snapshot = getProjectSubmissionCountdownSnapshot({
+      deadlineIso: config.deadlineIso,
+    });
+    valueEl.textContent = snapshot.valueText.replace("d", "天");
+
+    if (statusEl) {
+      statusEl.textContent = snapshot.expired ? "已截止" : "剩余";
+    }
+
+    root.classList.toggle("is-expired", snapshot.expired);
+    root.classList.toggle("is-live", snapshot.live);
+
+    if (snapshot.expired) {
+      clearCountdownTimer(PROJECT_SUBMISSION_COUNTDOWN_KEY);
+    }
+  };
+
+  clearCountdownTimer(PROJECT_SUBMISSION_COUNTDOWN_KEY);
+  applySnapshot();
+
+  if (getProjectSubmissionCountdownSnapshot({ deadlineIso: config.deadlineIso }).live) {
+    state.countdownTimers.set(PROJECT_SUBMISSION_COUNTDOWN_KEY, window.setInterval(applySnapshot, 1000));
+  }
+}
+
+async function refreshProjectSubmissionDeadlineConfig() {
+  const config = await loadProjectSubmissionDeadlineConfig({ supabase: state.supabase });
+  state.projectSubmissionDeadlineConfig = config;
+  initProjectSubmissionCountdown();
+}
+
+function syncProjectSubmissionDeadlineCopy(config) {
+  const root = els.projectSubmissionCountdown;
+  if (!root) {
+    return;
+  }
+
+  const label = config.label || "2026年4月25日24时";
+  root.dataset.deadlineSource = config.source || "fallback";
+  root.setAttribute("aria-label", `项目提交倒计时，截止时间 ${label}`);
+  root.setAttribute("title", `项目提交截止时间：${label}`);
+
+  const dateEl = root.querySelector(".project-deadline-date");
+  if (dateEl) {
+    dateEl.textContent = `截止 ${formatProjectSubmissionDeadlineLabel(label)}`;
+  }
+}
+
+function formatProjectSubmissionDeadlineLabel(label) {
+  const match = String(label ?? "").match(/(\d{4})年(\d{1,2})月(\d{1,2})日24时/);
+  if (match) {
+    return `${match[2]}月${match[3]}日 24:00`;
+  }
+
+  return "4月25日 24:00";
+}
+
 function navigate(page) {
+  hideSearchDropdown();
+
+  if (state.disabledNavPages.has(page)) {
+    console.info("[nav] disabled page:", page);
+    return false;
+  }
+
   document.querySelectorAll(".page").forEach((item) => item.classList.remove("active"));
   document.getElementById(`page-${page}`)?.classList.add("active");
 
   document.querySelectorAll(".nav-link").forEach((item) => item.classList.remove("active"));
   document.querySelector(`.nav-link[data-page="${page}"]`)?.classList.add("active");
 
-  window.scrollTo({ top: 0, behavior: "smooth" });
+  const resetScroll = () => {
+    window.scrollTo(0, 0);
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+  };
+
+  resetScroll();
+  requestAnimationFrame(resetScroll);
+  return true;
 }
 
 function toggleAuth() {
   state.isLogin = !state.isLogin;
-  renderAuthMode();
+  renderAuthModeCompat();
 }
 
 function renderAuthMode() {
@@ -427,17 +2709,48 @@ function renderAuthMode() {
   }
 
   els.authTitle.textContent = state.isLogin ? "欢迎回来" : "创建账号";
-  els.authPrimaryLabel.textContent = state.isLogin ? "邮箱" : "用户名";
-  els.authPrimaryInput.placeholder = state.isLogin ? "请输入邮箱" : "请输入用户名";
+  els.authPrimaryLabel.textContent = state.isLogin ? "Email" : "Username";
+  els.authPrimaryInput.placeholder = state.isLogin ? "Enter your email" : "Enter your username";
   els.authSubtitle.textContent = state.isLogin ? "登录你的 AttraX 账号" : "注册一个新的 AttraX 账号";
   els.authHelp.textContent = state.isLogin
-    ? "登录只支持注册邮箱，不支持用户名登录。"
-    : "注册需要填写用户名、邮箱和密码。";
+    ? "Login uses your registered email only."
+    : "Signup requires username, email, and password.";
   els.authButton.textContent = state.isLogin ? "登录" : "注册";
   els.authSwitch.innerHTML = state.isLogin
     ? '还没有账号？<a onclick="toggleAuth()">立即注册</a>'
     : '已有账号？<a onclick="toggleAuth()">去登录</a>';
   els.authEmailField.style.display = state.isLogin ? "none" : "block";
+  setStatus(els.authStatus, "");
+}
+
+function renderAuthModeCompat() {
+  if (!els.authTitle || !els.authPrimaryLabel || !els.authPrimaryInput || !els.authButton || !els.authSwitch) {
+    return;
+  }
+
+  els.authTitle.textContent = state.isLogin ? "欢迎回来" : "创建账号";
+  els.authPrimaryLabel.textContent = state.isLogin ? "Username / Email" : "Username";
+  els.authPrimaryInput.placeholder = state.isLogin ? "Enter username or email" : "Choose a username";
+
+  if (els.authSubtitle) {
+    els.authSubtitle.textContent = state.isLogin ? "登录你的 AttraX 账号" : "注册一个新的 AttraX 账号";
+  }
+
+  if (els.authHelp) {
+    els.authHelp.textContent = state.isLogin
+    ? "This UI keeps the older layout, but the backend currently uses email + password login."
+    : "Signup requires username, email, and password.";
+  }
+
+  els.authButton.textContent = state.isLogin ? "登录" : "注册";
+  els.authSwitch.innerHTML = state.isLogin
+    ? '还没有账号？<a onclick="toggleAuth()">立即注册</a>'
+    : '已有账号？<a onclick="toggleAuth()">去登录</a>';
+
+  if (els.authEmailField) {
+    els.authEmailField.style.display = state.isLogin ? "none" : "block";
+  }
+
   setStatus(els.authStatus, "");
 }
 
@@ -451,41 +2764,104 @@ function updateAuthUi() {
 
   if (navLoginButton) {
     navLoginButton.textContent = state.user ? name : "登录";
+    navLoginButton.style.display = state.user ? "none" : "";
+  }
+
+  if (userMenuWrap) {
+    userMenuWrap.style.display = state.user ? "" : "none";
+  }
+
+  if (!state.user) {
+    userDropdown?.classList.remove("show");
   }
 
   if (state.user && els.authSubtitle) {
-    els.authSubtitle.textContent = `${name} 已登录，可直接返回首页发帖。`;
-    els.authHelp.textContent = "现在可以直接发帖、评论和点赞了。";
+    els.authSubtitle.textContent = `${name} is signed in and ready to post.`;
+    els.authHelp.textContent = "You can now post, comment, and like immediately.";
   }
 }
 
-function renderFeed() {
-  if (!configReady || !els.feedPosts || state.posts.length === 0) {
+function toggleUserDropdown() {
+  if (!state.user || !userDropdown) {
+    if (!state.user) {
+      navigate("auth");
+    }
     return;
   }
 
-  const posts = [...state.posts].sort((left, right) => {
-    if (state.feedMode === "hot") {
-      return computeHotScore(right) - computeHotScore(left);
-    }
+  userDropdown.classList.toggle("show");
+}
 
-    if (state.feedMode === "odds") {
-      return (Number(right.hot_odds) || 0) - (Number(left.hot_odds) || 0);
-    }
+async function doLogout() {
+  userDropdown?.classList.remove("show");
 
-    return new Date(right.created_at).getTime() - new Date(left.created_at).getTime();
-  });
+  if (!state.supabase || !state.user) {
+    state.session = null;
+    state.user = null;
+    state.profile = null;
+    updateAuthUi();
+    navigate("home");
+    return;
+  }
 
-  els.feedPosts.innerHTML = posts
+  const { error } = await state.supabase.auth.signOut();
+
+  if (error) {
+    setStatus(els.authStatus, error.message, "error");
+    return;
+  }
+
+  state.session = null;
+  state.user = null;
+  state.profile = null;
+  state.wallet = null;
+  state.walletTransactions = [];
+  state.walletStatus = null;
+  state.walletError = null;
+  state.currentLikeId = null;
+  updateAuthUi();
+  renderProfileWallet();
+  await renderProfilePosts();
+  navigate("home");
+}
+
+function renderFeed({ scheduleLensRefresh = true } = {}) {
+  clearCountdownTimers("feed-");
+  if (!els.feedPosts) {
+    return;
+  }
+
+  const postBettingReady = FEATURE_GATES.postMarketWrites && state.postBetFeatureStatus !== "unsupported";
+  const visiblePosts = getVisibleFeedPosts([...state.posts]);
+  const posts = visiblePosts
+    .filter((post) => {
+      if (state.feedMode === "support") {
+        return supportsSupportBoard(post);
+      }
+
+      if (state.feedMode === "non-support") {
+        return !supportsSupportBoard(post);
+      }
+
+      return true;
+    })
+    .sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime());
+
+  const feedMarkup = posts
     .map((post) => {
+      const lensInsight = readLensAgentInsight(post, {
+        supportBoardSignal: findSupportBoardSignal(state.supportBoardItems, post.id),
+      });
       const tags = [
         post.category,
         post.is_ai_agent ? "AI Agent" : "Human",
+        getSupportParticipationLabel(post),
         post.hot_probability ? `热度 ${Math.round(post.hot_probability)}%` : "",
       ].filter(Boolean);
 
       return `
-        <div class="post-card" onclick="openDetailById('${post.id}')">
+        <div class="post-card sr" onclick="openDetailById('${post.id}')">
+          <div class="card-shimmer"></div>
           <div class="post-meta">
             ${renderAvatar("post-author", post.author_avatar_url, post.author_name)}
             <span class="post-author-name"${post.is_ai_agent ? ' style="color:var(--text-secondary)"' : ""}>${escapeHtml(post.author_name || "Unknown")}</span>
@@ -495,20 +2871,68 @@ function renderFeed() {
           </div>
           <div class="post-title">${escapeHtml(post.title)}</div>
           <div class="post-excerpt">${escapeHtml(trimText(post.content, 150))}</div>
-          ${renderPostImage(post.image_url)}
+          ${renderFeedPostImage(post.image_url)}
           <div class="post-tags">
             ${tags.map((tag) => `<span class="post-tag">${escapeHtml(tag)}</span>`).join("")}
           </div>
           ${post.is_ai_agent && post.author_disclosure ? `<div class="ai-disclosure" style="margin-bottom:12px">${escapeHtml(post.author_disclosure)}</div>` : ""}
+          ${renderLensAgentStrip(lensInsight)}
           <div class="post-stats">
             <span class="post-stat">${heartIcon()} ${formatCompact(post.like_count)}</span>
             <span class="post-stat">${commentIcon()} ${formatCompact(post.comment_count)}</span>
-            <span class="post-stat">${trendIcon()} ${post.hot_odds ? `${Number(post.hot_odds).toFixed(2)}x` : `${Math.round(post.flamewar_probability || 0)}%`}</span>
+            <span class="post-stat">${trendIcon()} ${supportsSupportBoard(post) ? (post.hot_odds ? `${Number(post.hot_odds).toFixed(2)}x` : `${Math.round(post.flamewar_probability || 0)}%`) : `${computePureHotScore(post)} 热度`}</span>
           </div>
+          ${renderFeedPostMarket(post)}
         </div>
       `;
     })
     .join("");
+
+  const searchBanner = renderFeedSearchBanner(state.posts.length, posts.length);
+  const feedBody = posts.length > 0
+    ? feedMarkup
+    : '<div class="feed-empty">没有匹配到帖子内容。可以换个关键词，或者点击“清除筛选”恢复完整信息流。</div>';
+
+  if (els.feedPosts.classList.contains("feed")) {
+    const existingHeader = renderFeedTabsHeader();
+    els.feedPosts.innerHTML = `${existingHeader}${searchBanner}${feedBody}`;
+  } else {
+    els.feedPosts.innerHTML = `${searchBanner}${feedBody}`;
+  }
+
+  if (scheduleLensRefresh) {
+    scheduleFeedLensAgentRefresh(posts);
+  }
+
+  requestAnimationFrame(() => {
+    els.feedPosts.querySelectorAll(".post-card.sr").forEach((card, index) => {
+      card.classList.remove("in");
+      setTimeout(() => {
+        card.classList.add("in");
+      }, 40 + index * 60);
+    });
+  });
+
+  els.feedPosts.querySelectorAll('[data-action="feed-post-side"]').forEach((button) => {
+    if (!postBettingReady) {
+      button.disabled = true;
+      const statusEl = button.closest(".post-market-inline")?.querySelector(".post-market-inline-status");
+      if (statusEl && !statusEl.textContent.trim()) {
+        statusEl.textContent = "Current backend has not enabled post-market writes yet.";
+      }
+      }
+
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        void handleFeedPostSideStake(button);
+      });
+    });
+
+  els.feedPosts.querySelector('[data-action="clear-feed-search"]')?.addEventListener("click", () => {
+    clearSearch({ clearApplied: true });
+  });
+
+  bindMarketCountdowns(els.feedPosts);
 }
 
 function renderHomeHotPosts() {
@@ -519,7 +2943,7 @@ function renderHomeHotPosts() {
   els.homeHotPostsCard.innerHTML = `
     <div class="sidebar-card-title">
       ${boltIcon()}
-      热帖榜 Top Posts
+      热帖榜 · Top Posts
     </div>
     ${state.hotPosts.slice(0, 5).map((item, index) => `
       <div class="rank-item" onclick="openDetailById('${item.post_id}')">
@@ -578,15 +3002,289 @@ function renderHomePredictions() {
   `;
 }
 
+function setLiveSupportBoardFilter(filterKey) {
+  state.supportBoardFilter = filterKey;
+  state.expandedSupportPostId = null;
+  renderLiveSupportBoard();
+}
+
+function toggleLiveSupportBoardItem(postId) {
+  state.expandedSupportPostId = state.expandedSupportPostId === postId ? null : postId;
+  renderLiveSupportBoard();
+}
+
+function renderLiveSupportBoard() {
+  if (!configReady || !els.homeHotPostsCard) {
+    return;
+  }
+
+  renderSupportBoardModule({
+    container: els.homeHotPostsCard,
+    items: state.supportBoardItems,
+    seriesByKey: state.supportBoardSeriesByKey,
+    dataSource: state.supportBoardDataSource,
+    supportBoardFilter: state.supportBoardFilter,
+    expandedSupportPostId: state.expandedSupportPostId,
+    helpers: {
+      defaults: SUPPORT_BOARD_DEFAULTS,
+      trendIcon,
+      rankClass,
+      medal,
+      escapeHtml,
+      escapeAttribute,
+      formatCompact,
+      formatRelativeTime,
+      trimText,
+      clampNumber,
+    },
+  });
+
+  bindLiveSupportBoardInteractions();
+}
+
+function renderPureHotPostsSidebar() {
+  if (!els.homePureHotCard) {
+    return;
+  }
+
+  const rows = state.nonSupportHotPosts.slice(0, 5);
+  if (rows.length === 0) {
+    els.homePureHotCard.innerHTML = `
+      <div class="sidebar-card-title">
+        ${trendIcon()}
+        纯热度排行榜
+      </div>
+      <div class="support-board-detail show" style="margin-top:10px">当前还没有未参与支持率排行的帖子。</div>
+    `;
+    return;
+  }
+
+  els.homePureHotCard.innerHTML = `
+    <div class="sidebar-card-title">
+      ${trendIcon()}
+      纯热度排行榜
+    </div>
+    ${rows.map((item, index) => `
+      <div class="rank-item" onclick="openDetailById('${item.post_id}')">
+        <span class="rank-num ${rankClass(index)}">${index < 3 ? medal(index) : index + 1}</span>
+        <div class="rank-info">
+          <div class="rank-title">${escapeHtml(item.title || "Untitled")}</div>
+          <div class="rank-heat">${escapeHtml(item.author_name || "Unknown")} · ${formatCompact(item.like_count || 0)} 赞 · ${formatCompact(item.comment_count || 0)} 评</div>
+        </div>
+        <div class="agent-mini-rate">${formatCompact(item.pure_hot_score || 0)}</div>
+      </div>
+    `).join("")}
+  `;
+}
+
+function bindLiveSupportBoardInteractions() {
+  els.homeHotPostsCard?.querySelectorAll(".support-board-detail").forEach((detail) => {
+    const postId = detail.previousElementSibling?.dataset?.supportPostId
+      || detail.previousElementSibling?.getAttribute("onclick")?.match(/openDetailById\(''([^'']+)''\)/)?.[1];
+    if (!postId) {
+      return;
+    }
+
+    detail.style.cursor = "pointer";
+    detail.addEventListener("click", () => {
+      openDetailById(postId);
+    });
+
+    let actionWrap = detail.querySelector(".support-board-detail-actions");
+    if (!actionWrap) {
+      actionWrap = document.createElement("div");
+      actionWrap.className = "support-board-detail-actions";
+      actionWrap.innerHTML = `<button type="button" class="support-board-open">Open post</button>`;
+      detail.appendChild(actionWrap);
+    }
+
+    const openButton = actionWrap.querySelector(".support-board-open");
+    openButton?.addEventListener("click", (event) => {
+      event.stopPropagation();
+      openDetailById(postId);
+    });
+  });
+}
+
+function initCookieConsent() {
+  const rawPreferences = window.localStorage.getItem(COOKIE_PREFERENCES_STORAGE_KEY);
+  state.cookiePreferences = loadCookiePreferences(rawPreferences);
+  syncCookiePreferenceUi();
+
+  const prompt = getInitialCookieConsentPrompt(rawPreferences);
+  if (prompt.showBar) {
+    window.setTimeout(() => {
+      showCookieConsentBar();
+    }, 900);
+  }
+}
+
+function loadCookiePreferences(rawValue = window.localStorage.getItem(COOKIE_PREFERENCES_STORAGE_KEY)) {
+  return parseCookiePreferences(rawValue);
+}
+
+function syncCookiePreferenceUi() {
+  els.cookieSwitches.forEach((toggle) => {
+    const key = toggle.dataset.cookie;
+    const isActive = Boolean(state.cookiePreferences?.[key]);
+    toggle.classList.toggle("active", isActive);
+    toggle.setAttribute("aria-pressed", String(isActive));
+  });
+}
+
+function toggleCookiePreference(key) {
+  if (!key || key === "necessary") {
+    return;
+  }
+
+  state.cookiePreferences = {
+    ...DEFAULT_COOKIE_PREFERENCES,
+    ...(state.cookiePreferences || {}),
+    [key]: !state.cookiePreferences?.[key],
+    necessary: true,
+  };
+  syncCookiePreferenceUi();
+}
+
+function showCookieConsentBar() {
+  if (!getInitialCookieConsentPrompt(window.localStorage.getItem(COOKIE_PREFERENCES_STORAGE_KEY)).showBar) {
+    return;
+  }
+
+  els.cookieConsentBar?.classList.add("show");
+}
+
+function hideCookieConsentBar() {
+  els.cookieConsentBar?.classList.remove("show");
+}
+
+async function syncCookieConsentWithBackend() {
+  if (!state.supabase || !state.user || state.cookieConsentSyncInFlight) {
+    return;
+  }
+
+  state.cookieConsentSyncInFlight = true;
+
+  try {
+    const rawPreferences = window.localStorage.getItem(COOKIE_PREFERENCES_STORAGE_KEY);
+    const hasLocalDecision = !getInitialCookieConsentPrompt(rawPreferences).showBar;
+    if (hasLocalDecision) {
+      await syncCookieConsentToBackend("custom", { skipGuard: true });
+      return;
+    }
+
+    const { data, error } = await state.supabase
+      .from("user_cookie_consents")
+      .select("necessary, analytics, marketing, preference, last_decision, consent_version, client_updated_at, updated_at")
+      .eq("profile_id", state.user.id)
+      .maybeSingle();
+
+    if (error) {
+      console.warn("cookie consent load failed", error);
+      return;
+    }
+
+    const backendPreferences = parseCookieConsentRecord(data);
+    if (!backendPreferences) {
+      return;
+    }
+
+    state.cookiePreferences = backendPreferences;
+    window.localStorage.setItem(COOKIE_PREFERENCES_STORAGE_KEY, JSON.stringify(state.cookiePreferences));
+    syncCookiePreferenceUi();
+    hideCookieConsentBar();
+  } finally {
+    state.cookieConsentSyncInFlight = false;
+  }
+}
+
+async function syncCookieConsentToBackend(decision = "custom", options = {}) {
+  if (!state.supabase || !state.user || (state.cookieConsentSyncInFlight && !options.skipGuard)) {
+    return;
+  }
+
+  const record = buildCookieConsentRecord({
+    profileId: state.user.id,
+    preferences: state.cookiePreferences,
+    decision,
+  });
+
+  if (!record) {
+    return;
+  }
+
+  const { error } = await state.supabase
+    .from("user_cookie_consents")
+    .upsert(record, { onConflict: "profile_id" });
+
+  if (error) {
+    console.warn("cookie consent sync failed", error);
+  }
+}
+
+function openCookieModal() {
+  hideCookieConsentBar();
+  state.cookiePreferences = state.cookiePreferences || loadCookiePreferences();
+  syncCookiePreferenceUi();
+  els.cookieModal?.classList.add("active");
+  document.body.style.overflow = "hidden";
+}
+
+function closeCookieModal() {
+  els.cookieModal?.classList.remove("active");
+  document.body.style.overflow = "";
+
+  if (getInitialCookieConsentPrompt(window.localStorage.getItem(COOKIE_PREFERENCES_STORAGE_KEY)).showBar) {
+    window.setTimeout(() => {
+      showCookieConsentBar();
+    }, 150);
+  }
+}
+
+function saveCookieSettings(mode) {
+  state.cookiePreferences = buildCookiePreferences(mode, state.cookiePreferences);
+
+  window.localStorage.setItem(COOKIE_PREFERENCES_STORAGE_KEY, JSON.stringify(state.cookiePreferences));
+  syncCookiePreferenceUi();
+  closeCookieModal();
+  hideCookieConsentBar();
+  void syncCookieConsentToBackend(mode);
+}
+
+function loadBookmarkedPostIds() {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(BOOKMARK_STORAGE_KEY) || "[]");
+    return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
+  } catch (_error) {
+    return [];
+  }
+}
+
+function persistBookmarkedPostIds() {
+  window.localStorage.setItem(BOOKMARK_STORAGE_KEY, JSON.stringify(state.bookmarkedPostIds));
+}
+
+function isPostBookmarked(postId) {
+  return state.bookmarkedPostIds.includes(postId);
+}
+
 function renderDetail() {
   const post = state.currentDetailPost;
-  if (!post) {
+  if (
+    !post ||
+    !els.detailTags ||
+    !els.detailTitle ||
+    !els.detailAuthorRow ||
+    !els.detailMedia ||
+    !els.detailContent
+  ) {
     return;
   }
 
   els.detailTags.innerHTML = [
     post.category,
     post.is_ai_agent ? "AI Agent" : "Human",
+    getSupportParticipationLabel(post),
     post.hot_probability ? `热度 ${Math.round(post.hot_probability)}%` : "",
   ]
     .filter(Boolean)
@@ -604,9 +3302,9 @@ function renderDetail() {
     ${renderHeatBadge(post, true)}
   `;
 
-  els.detailMedia.innerHTML = post.image_url
-    ? `<img src="${escapeAttribute(post.image_url)}" alt="${escapeAttribute(post.title)}" style="width:100%;display:block;border-radius:16px;max-height:320px;object-fit:cover">`
-    : `<span>📷 暂无帖子图片</span>`;
+  const detailImageMarkup = renderDetailImage(post.image_url, post.title);
+  els.detailMedia.innerHTML = detailImageMarkup;
+  els.detailMedia.hidden = !detailImageMarkup;
 
   els.detailContent.innerHTML = renderParagraphs(post.content);
   renderDetailActions();
@@ -621,6 +3319,8 @@ function renderDetailActions() {
   }
 
   const liked = Boolean(state.currentLikeId);
+  const bookmarked = isPostBookmarked(post.id);
+  const canDelete = canDeleteCurrentPost(post);
   els.detailActions.innerHTML = `
     <button class="action-btn ${liked ? "liked" : ""}" data-action="like">
       ${heartFillIcon()}
@@ -630,22 +3330,210 @@ function renderDetailActions() {
       ${commentIcon()}
       ${formatCompact(post.comment_count)}
     </button>
-    <button class="action-btn">
+    <button class="action-btn ${bookmarked ? "liked" : ""}" data-action="bookmark">
       ${bookmarkIcon()}
       收藏
     </button>
-    <button class="action-btn" style="margin-left:auto">
+    ${canDelete ? `
+      <button class="action-btn danger" data-action="delete-post">
+        ${trashIcon()}
+        Delete
+      </button>
+    ` : ""}
+    <button class="action-btn" data-action="share" style="margin-left:auto">
       ${shareIcon()}
-      分享
+      Share ${formatCompact(post.share_count || 0)}
     </button>
   `;
 
   els.detailActions.querySelector('[data-action="like"]')?.addEventListener("click", () => {
     void toggleLike();
   });
+  els.detailActions.querySelector('[data-action="bookmark"]')?.addEventListener("click", () => {
+    toggleBookmark();
+  });
+  els.detailActions.querySelector('[data-action="share"]')?.addEventListener("click", () => {
+    void shareCurrentPost();
+  });
+  els.detailActions.querySelector('[data-action="delete-post"]')?.addEventListener("click", () => {
+    void deleteCurrentPost();
+  });
 }
 
-function renderDetailOdds() {
+function canDeleteCurrentPost(post) {
+  if (!post || !state.user) {
+    return false;
+  }
+
+  return post.author_kind === "human" && post.author_profile_id === state.user.id;
+}
+
+function setDetailActionStatus(message, type = "") {
+  setStatus(els.commentStatus, message, type);
+  setStatus(els.authStatus, message, type);
+}
+
+function isMissingBackendFeatureError(message = "") {
+  return /relation .* does not exist|schema cache|Could not find|function .* does not exist|does not exist/i.test(
+    String(message),
+  );
+}
+
+async function recordPostShare(postId, shareTarget = "link") {
+  if (!state.supabase || !state.user || !postId) {
+    return false;
+  }
+
+  const { error } = await state.supabase
+    .from("post_shares")
+    .insert({
+      post_id: postId,
+      actor_profile_id: state.user.id,
+      share_target: shareTarget,
+    });
+
+  if (error) {
+    if (!isMissingBackendFeatureError(error.message)) {
+      console.warn("Unable to record post share.", error.message);
+    }
+    return false;
+  }
+
+  const incrementShareCount = (post) => {
+    if (!post || post.id !== postId) {
+      return post;
+    }
+
+    return {
+      ...post,
+      share_count: Number(post.share_count || 0) + 1,
+    };
+  };
+
+  state.posts = state.posts.map(incrementShareCount);
+  state.currentDetailPost = incrementShareCount(state.currentDetailPost);
+  renderDetailActions();
+  return true;
+}
+
+async function shareCurrentPost() {
+  const post = state.currentDetailPost;
+  if (!post?.id) {
+    return;
+  }
+
+  const shareUrl = buildPostShareUrl(post.id);
+  const shareData = {
+    title: post.title || "AttraX post",
+    text: trimText(post.content || "", 120),
+    url: shareUrl,
+  };
+
+  if (navigator.share) {
+    try {
+      await navigator.share(shareData);
+      await recordPostShare(post.id, "system");
+      const shareButton = els.detailActions?.querySelector('[data-action="share"]');
+      await triggerShareDemo(shareButton, {
+        updateDemoState: false,
+        shareText: "",
+        toast: "Post shared",
+      });
+      setDetailActionStatus("Post shared.", "success");
+      return;
+    } catch (error) {
+      if (error?.name === "AbortError") {
+        return;
+      }
+    }
+  }
+
+  try {
+    await copyTextToClipboard(shareUrl);
+    await recordPostShare(post.id, "link");
+    const shareButton = els.detailActions?.querySelector('[data-action="share"]');
+    await triggerShareDemo(shareButton, {
+      updateDemoState: false,
+      shareText: "",
+      toast: "Share link copied",
+    });
+    setDetailActionStatus("Share link copied.", "success");
+  } catch (error) {
+    setDetailActionStatus(error?.message || "Unable to copy share link.", "error");
+  }
+}
+
+async function deleteCurrentPost() {
+  const post = state.currentDetailPost;
+  if (!post?.id || !canDeleteCurrentPost(post)) {
+    setDetailActionStatus("Only the post author can delete this post.", "error");
+    return;
+  }
+
+  if (!state.supabase) {
+    setDetailActionStatus("Supabase is not ready.", "error");
+    return;
+  }
+
+  const confirmed = window.confirm("Delete this post? This cannot be undone.");
+  if (!confirmed) {
+    return;
+  }
+
+  const postId = post.id;
+  const deleteButton = els.detailActions?.querySelector('[data-action="delete-post"]');
+  if (deleteButton) {
+    deleteButton.disabled = true;
+    deleteButton.classList.add("is-loading");
+  }
+
+  const { error } = await state.supabase
+    .from("posts")
+    .delete()
+    .eq("id", postId);
+
+  if (error) {
+    if (deleteButton) {
+      deleteButton.disabled = false;
+      deleteButton.classList.remove("is-loading");
+    }
+    setDetailActionStatus(error.message, "error");
+    return;
+  }
+
+  state.bookmarkedPostIds = state.bookmarkedPostIds.filter((item) => item !== postId);
+  persistBookmarkedPostIds();
+  state.detailPostId = null;
+  state.currentDetailPost = null;
+  state.currentLikeId = null;
+  setDetailActionStatus("Post deleted.", "success");
+
+  await loadHomepageData();
+  await renderProfilePosts();
+  if (state.posts[0]) {
+    await loadDetailData(state.posts[0].id);
+  }
+  navigate("home");
+}
+
+function toggleBookmark() {
+  const postId = state.currentDetailPost?.id;
+  if (!postId) {
+    return;
+  }
+
+  if (isPostBookmarked(postId)) {
+    state.bookmarkedPostIds = state.bookmarkedPostIds.filter((item) => item !== postId);
+  } else {
+    state.bookmarkedPostIds = [postId, ...state.bookmarkedPostIds.filter((item) => item !== postId)];
+  }
+
+  persistBookmarkedPostIds();
+  renderDetailActions();
+  void renderProfilePosts();
+}
+
+function renderDetailOddsLegacy() {
   const post = state.currentDetailPost;
   if (!post || !els.detailOddsModule) {
     return;
@@ -664,7 +3552,7 @@ function renderDetailOdds() {
   els.detailOddsModule.innerHTML = `
     <div class="odds-title">
       ${boltIcon()}
-      赔率分析
+      odds 分析
     </div>
     <div class="odds-grid">
       ${oddsCards.map((item) => `
@@ -677,7 +3565,7 @@ function renderDetailOdds() {
     ${state.detailPredictions.slice(0, 3).map((item) => `
       <div class="agent-predict" style="margin-top:14px">
         <div class="agent-predict-avatar">${item.is_ai_agent ? "🤖" : "📡"}</div>
-        <div>
+        <div class="agent-predict-main">
           <div class="agent-predict-name">${escapeHtml(item.predictor_name || "Arena Pulse")} · ${escapeHtml(item.prediction_label)} <span class="ai-disclosure">${escapeHtml(item.predictor_badge || "")}</span></div>
           <div class="agent-predict-text">${escapeHtml(item.headline)}${item.predictor_disclosure ? ` · ${escapeHtml(item.predictor_disclosure)}` : ""}</div>
         </div>
@@ -687,6 +3575,10 @@ function renderDetailOdds() {
 }
 
 function renderDetailComments() {
+  if (!els.detailCommentsTitle || !els.detailCommentsList) {
+    return;
+  }
+
   els.detailCommentsTitle.textContent = `评论 (${state.detailComments.length})`;
   els.detailCommentsList.innerHTML = state.detailComments
     .map((comment) => `
@@ -706,7 +3598,7 @@ function renderDetailComments() {
     .join("");
 }
 
-function renderLeaderboard() {
+function renderLeaderboard({ mode = "replace", reason = "manual" } = {}) {
   if (!configReady || !els.lbTable) {
     return;
   }
@@ -716,15 +3608,24 @@ function renderLeaderboard() {
     return;
   }
 
-  els.lbTable.classList.add("switching");
-  els.lbTable.classList.remove("switching-in");
+  leaderboardMotion.update(rows, {
+    contextKey: getLeaderboardContextKey(),
+    mode,
+  });
 
-  window.setTimeout(() => {
-    els.lbTable.innerHTML = rows.map(renderLeaderboardRow).join("");
-    els.lbTable.classList.remove("switching");
-    els.lbTable.classList.add("switching-in");
-    window.setTimeout(() => els.lbTable.classList.remove("switching-in"), 400);
-  }, 140);
+  if (reason === "initial-load") {
+    setLeaderboardLiveStatus("榜单已加载，等待实时同步", "idle");
+    return;
+  }
+
+  if (reason === "live-update") {
+    setLeaderboardLiveStatus("实时榜单刚刚更新", "live");
+    return;
+  }
+
+  if (reason === "poll" && !state.leaderboardRealtimeSubscribed) {
+    setLeaderboardLiveStatus("Polling refresh completed", "polling");
+  }
 }
 
 function getLeaderboardRows() {
@@ -733,10 +3634,10 @@ function getLeaderboardRows() {
     return source.slice(0, 8).map((item, index) => ({
       id: item.post_id,
       title: item.title,
-      subtitle: `${item.author_name || "Unknown"} · ${Number(item.hot_score ?? item.chaos_score ?? 0).toFixed(1)} 分`,
+      subtitle: `${item.author_name || "Unknown"} · ${Number(item.hot_score ?? item.chaos_score ?? 0).toFixed(1)} pts`,
       score: Number(item.hot_score ?? item.chaos_score ?? 0),
-      detail: item.author_disclosure || (item.is_ai_agent ? "该条目来自 AI Agent 账号，已做明确标识。" : "该条目来自真人用户内容。"),
-      action: "查看帖子",
+      detail: item.author_disclosure || (item.is_ai_agent ? "This post was created by a clearly labeled AI Agent account." : "This post was created by a human user."),
+      action: "Open post",
       type: "post",
       rankIndex: index,
     }));
@@ -748,8 +3649,8 @@ function getLeaderboardRows() {
       title: item.actor_name,
       subtitle: `${item.actor_kind === "agent" ? "Agent" : "Human"} · 发帖 ${item.post_count} · 评论 ${item.comment_count}`,
       score: Number(item.activity_score ?? 0),
-      detail: item.actor_disclosure || `预测 ${item.prediction_count} 次`,
-      action: item.actor_kind === "agent" ? "查看资料" : "查看主页",
+      detail: item.actor_disclosure || `Predictions: ${item.prediction_count}`,
+      action: item.actor_kind === "agent" ? "Open profile" : "Open profile",
       type: "actor",
       rankIndex: index,
     }));
@@ -761,8 +3662,8 @@ function getLeaderboardRows() {
       title: item.title,
       subtitle: `${item.author_name || "Unknown"} · 引战 ${Math.round(item.flamewar_probability || 0)}%`,
       score: Number(item.chaos_score ?? 0),
-      detail: item.author_disclosure || `近 7 天 AI 评论 ${item.recent_agent_comment_count} 条`,
-      action: "查看帖子",
+      detail: item.author_disclosure || `AI comments in the last 7 days: ${item.recent_agent_comment_count}`,
+      action: "Open post",
       type: "post",
       rankIndex: index,
     }));
@@ -806,22 +3707,25 @@ function buildAgentPredictionRows() {
       title: item.title,
       subtitle: `预测 ${item.count} 次 · 平均概率 ${Math.round(item.probabilityTotal / Math.max(item.count, 1))}%`,
       score: item.score,
-      detail: item.detail || "系统根据当前预测卡片聚合生成。",
+      detail: item.detail || "System-generated from current prediction cards.",
       action: "查看预测",
       type: "prediction",
     }));
 }
 
 function renderLeaderboardRow(row) {
+  const motionClasses = row.motionClasses ? ` ${row.motionClasses}` : "";
+  const motionTrend = row.motionTrend ? ` data-trend="${escapeAttribute(row.motionTrend)}"` : "";
+  const motionKey = escapeAttribute(row.motionKey || row.id || row.title || "");
   return `
-    <div class="lb-row" onclick="toggleLbRow(this)">
+    <div class="lb-row${motionClasses}" data-row-key="${motionKey}"${motionTrend} onclick="toggleLbRow(this)">
       <span class="lb-rank ${rankClass(row.rankIndex)}">${row.rankIndex < 3 ? medal(row.rankIndex) : row.rankIndex + 1}</span>
       <div class="lb-content">
         <div class="lb-content-title">${escapeHtml(row.title)}</div>
         <div class="lb-content-sub">${escapeHtml(row.subtitle)}</div>
       </div>
       <span class="lb-score">${formatCompact(row.score)}</span>
-      <span class="lb-expand-hint">点击展开 ▾</span>
+      <span class="lb-expand-hint">点击展开 &#9662;</span>
       <div class="lb-row-detail">
         <div class="lb-detail-tags">
           <span class="lb-detail-tag">${escapeHtml(state.leaderboardTab)}</span>
@@ -839,7 +3743,7 @@ function renderLeaderboardRow(row) {
 
 async function submitAuth() {
   if (!configReady) {
-    setStatus(els.authStatus, "请先在 front/supabase-config.mjs 中填写 Supabase 配置。", "error");
+    setStatus(els.authStatus, "Please fill in front/supabase-config.mjs before continuing.", "error");
     return;
   }
 
@@ -850,13 +3754,13 @@ async function submitAuth() {
 
   if (state.isLogin) {
     if (!primaryValue || !password) {
-      setStatus(els.authStatus, "请输入邮箱和密码。", "error");
+    setStatus(els.authStatus, "Please enter your email and password.", "error");
       els.authPrimaryInput.focus();
       return;
     }
 
     if (!primaryValue.includes("@")) {
-      setStatus(els.authStatus, "登录请填写注册邮箱，不支持用户名登录。", "error");
+    setStatus(els.authStatus, "Please use your registered email to log in.", "error");
       els.authPrimaryInput.focus();
       return;
     }
@@ -872,13 +3776,13 @@ async function submitAuth() {
     }
 
     els.authPasswordInput.value = "";
-    setStatus(els.authStatus, "登录成功，正在返回首页。", "success");
+    setStatus(els.authStatus, "Login successful. Returning to the homepage...", "success");
     navigate("home");
     return;
   }
 
   if (!primaryValue || !emailValue || !password) {
-    setStatus(els.authStatus, "注册需要用户名、邮箱和密码。", "error");
+    setStatus(els.authStatus, "Signup requires username, email, and password.", "error");
     if (!primaryValue) {
       els.authPrimaryInput.focus();
     } else if (!emailValue) {
@@ -889,7 +3793,7 @@ async function submitAuth() {
     return;
   }
 
-  const { error } = await state.supabase.auth.signUp({
+  const { data, error } = await state.supabase.auth.signUp({
     email: emailValue,
     password,
     options: {
@@ -907,30 +3811,60 @@ async function submitAuth() {
   els.authPrimaryInput.value = emailValue;
   els.authEmailInput.value = "";
   els.authPasswordInput.value = "";
+  if (data.session?.user) {
+    state.session = data.session;
+    state.user = data.session.user;
+    await loadProfile();
+    await ensureWalletExperience({ reason: "signup", allowDailyReward: false });
+    updateAuthUi();
+    renderProfileWallet();
+    await renderProfilePosts();
+    navigate("profile");
+    if (!FEATURE_GATES.wallet) {
+      setStatus(els.authStatus, "Wallet / reward draft features are disabled on the current backend main contract.", "success");
+      return;
+    }
+    setStatus(els.authStatus, "Signup successful. Starter coins granted.", "success");
+    return;
+  }
+
   state.isLogin = true;
-  renderAuthMode();
+  renderAuthModeCompat();
   setStatus(
     els.authStatus,
-    "注册成功。请使用刚才填写的邮箱登录；如果项目开启了邮箱确认，请先去邮箱点验证链接。",
+      "Signup successful. Please log in with the email you just used. If email confirmation is enabled, confirm it first.",
     "success",
   );
 }
 
 async function submitPost() {
   if (!state.user) {
-    setStatus(els.authStatus, "请先登录后再发帖。", "error");
-    setStatus(els.createStatus, "请先登录后再发帖。", "error");
+    setStatus(els.authStatus, "Please log in before posting.", "error");
+    setStatus(els.createStatus, "Please log in before posting.", "error");
     navigate("auth");
     return;
   }
 
   const title = els.createTitleInput.value.trim();
   const content = els.createBodyInput.value.trim();
+  const participatesInSupportBoard = Boolean(els.createSupportToggle?.checked ?? true);
+  const supportDeadlineDate = participatesInSupportBoard
+    ? parseLocalDateTimeInput(els.createSupportDeadlineInput?.value)
+    : null;
   setStatus(els.createStatus, "");
 
   if (!title || !content) {
-    setStatus(els.createStatus, "标题和正文都需要填写。", "error");
+    setStatus(els.createStatus, "Please fill in both the title and body.", "error");
     return;
+  }
+
+  if (participatesInSupportBoard) {
+    const validation = buildSupportDeadlineValidation(supportDeadlineDate);
+    if (!validation.ok) {
+      setStatus(els.createStatus, validation.message, "error");
+      els.createSupportDeadlineInput?.focus();
+      return;
+    }
   }
 
   let imageUrl = null;
@@ -952,8 +3886,10 @@ async function submitPost() {
       author_agent_id: null,
       title,
       content,
-      image_url: imageUrl,
+      image_url: normalizePostImageUrl(imageUrl),
       category: "discussion",
+      participates_in_support_board: participatesInSupportBoard,
+      support_board_deadline_at: participatesInSupportBoard ? supportDeadlineDate.toISOString() : null,
     })
     .select("id")
     .single();
@@ -969,9 +3905,16 @@ async function submitPost() {
   els.createTitleInput.value = "";
   els.createBodyInput.value = "";
   els.createImageInput.value = "";
+  if (els.createSupportToggle) {
+    els.createSupportToggle.checked = true;
+  }
+  if (els.createSupportDeadlineInput) {
+    els.createSupportDeadlineInput.value = "";
+  }
   state.createImageFile = null;
+  syncCreateSupportControls({ preserveValue: false });
   els.createUploadLabel.textContent = "点击或拖拽上传图片";
-  setStatus(els.createStatus, "帖子发布成功。", "success");
+  setStatus(els.createStatus, "Post published successfully.", "success");
 
   await loadHomepageData();
   if (data?.id) {
@@ -996,13 +3939,13 @@ async function uploadSelectedImage(file) {
   }
 
   const { data } = state.supabase.storage.from(STORAGE_BUCKET).getPublicUrl(filePath);
-  return data.publicUrl;
+  return normalizePostImageUrl(data.publicUrl);
 }
 
 async function submitComment() {
   if (!state.user) {
-    setStatus(els.authStatus, "请先登录后再评论。", "error");
-    setStatus(els.commentStatus, "请先登录后再评论。", "error");
+    setStatus(els.authStatus, "Please log in before commenting.", "error");
+    setStatus(els.commentStatus, "Please log in before commenting.", "error");
     navigate("auth");
     return;
   }
@@ -1010,7 +3953,7 @@ async function submitComment() {
   const content = els.commentInput.value.trim();
   setStatus(els.commentStatus, "");
   if (!content || !state.detailPostId) {
-    setStatus(els.commentStatus, "评论内容不能为空。", "error");
+    setStatus(els.commentStatus, "Comment cannot be empty.", "error");
     return;
   }
 
@@ -1034,13 +3977,13 @@ async function submitComment() {
   }
 
   els.commentInput.value = "";
-  setStatus(els.commentStatus, "评论发布成功。", "success");
+    setStatus(els.commentStatus, "Comment published successfully.", "success");
   await Promise.all([loadHomepageData(), loadDetailData(state.detailPostId)]);
 }
 
 async function toggleLike() {
   if (!state.user || !state.currentDetailPost) {
-    setStatus(els.authStatus, "请先登录后再点赞。", "error");
+    setStatus(els.authStatus, "Please log in before liking posts.", "error");
     navigate("auth");
     return;
   }
@@ -1069,35 +4012,278 @@ async function toggleLike() {
       setStatus(els.authStatus, error.message, "error");
       return;
     }
+
+    state.pendingDetailLikeBurst = true;
   }
 
   await Promise.all([loadHomepageData(), loadDetailData(postId)]);
+
+  if (state.pendingDetailLikeBurst) {
+    triggerLikeDemo(els.detailActions?.querySelector('[data-action="like"]'), {
+      updateDemoState: false,
+      forceActive: true,
+    });
+    state.pendingDetailLikeBurst = false;
+  }
 }
 
 async function renderProfilePosts() {
-  if (!configReady || !state.user || !profilePostsContainer) {
+  renderProfileWallet();
+
+  if (!profilePostsContainer) {
     return;
   }
 
-  const { data, error } = await state.supabase
-    .from("feed_posts")
-    .select("*")
-    .eq("author_profile_id", state.user.id)
-    .order("created_at", { ascending: false })
-    .limit(3);
-
-  if (error || !data) {
+  if (!configReady || !state.user) {
+    state.profilePosts = [];
+    state.profileComments = [];
+    state.profileBookmarks = [];
+    renderProfileActivity();
     return;
   }
 
-  profilePostsContainer.innerHTML = data
-    .map((post) => `
+  const [postsResult, commentsResult] = await Promise.all([
+    state.supabase
+      .from("feed_posts")
+      .select("*")
+      .eq("author_profile_id", state.user.id)
+      .order("created_at", { ascending: false })
+      .limit(20),
+    state.supabase
+      .from("feed_comments")
+      .select("*")
+      .eq("author_profile_id", state.user.id)
+      .order("created_at", { ascending: false })
+      .limit(20),
+  ]);
+
+  state.profilePosts = postsResult.error ? [] : (postsResult.data ?? []);
+
+  const comments = commentsResult.error ? [] : (commentsResult.data ?? []);
+  const relatedPostIds = [...new Set([
+    ...comments.map((item) => item.post_id),
+    ...state.bookmarkedPostIds,
+  ].filter(Boolean))];
+  const postMap = new Map(state.posts.map((item) => [item.id, item]));
+  const missingPostIds = relatedPostIds.filter((postId) => !postMap.has(postId));
+
+  if (missingPostIds.length > 0) {
+    const relatedPostsResult = await state.supabase
+      .from("feed_posts")
+      .select("*")
+      .in("id", missingPostIds);
+
+    if (!relatedPostsResult.error) {
+      (relatedPostsResult.data ?? []).forEach((item) => {
+        postMap.set(item.id, item);
+      });
+    }
+  }
+
+  state.profileComments = comments.map((comment) => ({
+    ...comment,
+    post_title: postMap.get(comment.post_id)?.title || "相关帖子",
+  }));
+
+  state.profileBookmarks = state.bookmarkedPostIds
+    .map((postId, index) => {
+      const post = postMap.get(postId);
+      return post
+        ? {
+          ...post,
+          saved_at: new Date(Date.now() - index * 60000).toISOString(),
+        }
+        : null;
+    })
+    .filter(Boolean);
+
+  if (els.profilePostCount) {
+    els.profilePostCount.textContent = String(state.profilePosts.length);
+  }
+
+  renderProfileActivity();
+}
+
+function setProfileTab(tab) {
+  state.profileTab = tab;
+  els.profileTabs.forEach((button, index) => {
+    const key = ["posts", "comments", "bookmarks"][index] ?? "posts";
+    button.classList.toggle("active", key === tab);
+  });
+  renderProfileActivity();
+}
+
+function renderProfileActivity() {
+  if (!profilePostsContainer) {
+    return;
+  }
+
+  if (!state.user) {
+    profilePostsContainer.innerHTML = `
+      <div class="profile-wallet-empty">
+        登录后可查看你的帖子、评论和收藏。
+      </div>
+    `;
+    return;
+  }
+
+  if (state.profileTab === "comments") {
+    profilePostsContainer.innerHTML = state.profileComments.length > 0
+      ? state.profileComments.map((comment) => `
+        <div class="profile-post-item" onclick="openDetailById('${comment.post_id}')">
+          <div class="profile-post-item-title">评论于《${escapeHtml(comment.post_title)}》</div>
+          <div class="profile-post-item-meta">${formatRelativeTime(comment.created_at)} · 点击查看原帖</div>
+          <div class="post-excerpt" style="margin:10px 0 0; -webkit-line-clamp:3;">${escapeHtml(comment.content)}</div>
+        </div>
+      `).join("")
+      : `
+        <div class="profile-wallet-empty">
+          你还没有发表过评论。
+        </div>
+      `;
+    return;
+  }
+
+  if (state.profileTab === "bookmarks") {
+    profilePostsContainer.innerHTML = state.profileBookmarks.length > 0
+      ? state.profileBookmarks.map((post) => `
+        <div class="profile-post-item" onclick="openDetailById('${post.id}')">
+          <div class="profile-post-item-title">${escapeHtml(post.title)}</div>
+          <div class="profile-post-item-meta">已收藏 · 👍 ${formatCompact(post.like_count)} · 💬 ${formatCompact(post.comment_count)}</div>
+        </div>
+      `).join("")
+      : `
+        <div class="profile-wallet-empty">
+          你还没有收藏内容。当前先按点赞记录展示收藏列表。
+        </div>
+      `;
+    return;
+  }
+
+  profilePostsContainer.innerHTML = state.profilePosts.length > 0
+    ? state.profilePosts.map((post) => `
       <div class="profile-post-item" onclick="openDetailById('${post.id}')">
         <div class="profile-post-item-title">${escapeHtml(post.title)}</div>
         <div class="profile-post-item-meta">${formatRelativeTime(post.created_at)} · 👍 ${formatCompact(post.like_count)} · 💬 ${formatCompact(post.comment_count)}</div>
       </div>
-    `)
-    .join("");
+    `).join("")
+    : `
+      <div class="profile-wallet-empty">
+        你还没有发过帖子。
+      </div>
+    `;
+}
+
+function renderProfileWallet() {
+  const walletUnsupported = state.walletFeatureStatus === "unsupported";
+  if (els.profileStatLabels?.length >= 3) {
+    els.profileStatLabels[0].textContent = "Posts";
+    els.profileStatLabels[1].textContent = "Coins";
+    els.profileStatLabels[2].textContent = "Rewards";
+  }
+
+  if (els.profileName) {
+    els.profileName.textContent = state.profile?.username || state.user?.email?.split("@")[0] || "Guest";
+  }
+
+  if (els.profileBio) {
+    els.profileBio.textContent = state.user
+      ? "Human participant · wallet-enabled account"
+      : "Sign in to unlock your wallet, daily rewards, and transaction history.";
+  }
+
+  if (els.profileWalletCard) {
+    els.profileWalletCard.style.display = state.user ? "block" : "none";
+  }
+
+  if (walletUnsupported && els.profileBio && state.user) {
+    els.profileBio.textContent = "Human participant · forum mode active. Wallet rollout is pending on this backend.";
+  }
+
+  if (els.profileWalletBalance) {
+    els.profileWalletBalance.textContent = state.wallet ? formatCompact(state.wallet.balance) : "--";
+  }
+
+  if (els.profileRewardCount) {
+    els.profileRewardCount.textContent = String(
+      state.walletTransactions.filter((item) => item.direction === "credit").length,
+    );
+  }
+
+  if (els.profileWalletStatus) {
+    els.profileWalletStatus.textContent = state.walletError || state.walletStatus || "Wallet ready.";
+    els.profileWalletStatus.className = `profile-wallet-status ${state.walletError ? "is-error" : ""}`.trim();
+  }
+
+  if (els.profileWalletSummary) {
+    els.profileWalletSummary.innerHTML = state.wallet
+      ? `
+        <div class="profile-wallet-metric">
+          <span class="profile-wallet-label">Balance</span>
+            <strong>${formatCompact(state.wallet.balance)} oute</strong>
+        </div>
+        <div class="profile-wallet-metric">
+          <span class="profile-wallet-label">Earned</span>
+          <strong>${formatCompact(state.wallet.lifetime_earned)}</strong>
+        </div>
+        <div class="profile-wallet-metric">
+          <span class="profile-wallet-label">Spent</span>
+          <strong>${formatCompact(state.wallet.lifetime_spent)}</strong>
+        </div>
+        <div class="profile-wallet-metric">
+          <span class="profile-wallet-label">Last reward</span>
+          <strong>${state.wallet.last_rewarded_at ? formatRelativeTime(state.wallet.last_rewarded_at) : "--"}</strong>
+        </div>
+      `
+      : `
+        <div class="profile-wallet-empty">
+          Wallet not available yet. Sign in and trigger the reward flow first.
+        </div>
+      `;
+  }
+
+  if (walletUnsupported && els.profileWalletStatus) {
+    els.profileWalletStatus.textContent = "Wallet module is not enabled on this backend yet.";
+    els.profileWalletStatus.className = "profile-wallet-status";
+  }
+
+  if (walletUnsupported && els.profileWalletSummary) {
+    els.profileWalletSummary.innerHTML = `
+      <div class="profile-wallet-empty">
+        Wallet tables and reward functions have not been rolled out on the current backend contract yet.
+      </div>
+    `;
+  }
+
+  if (els.profileWalletTransactions) {
+    els.profileWalletTransactions.innerHTML = state.walletTransactions.length > 0
+      ? state.walletTransactions
+        .map((item) => `
+          <div class="profile-wallet-transaction">
+            <div>
+              <div class="profile-wallet-transaction-title">${escapeHtml(item.description || item.transaction_type)}</div>
+              <div class="profile-wallet-transaction-meta">${escapeHtml(item.transaction_type)} · ${formatRelativeTime(item.created_at)}</div>
+            </div>
+            <div class="profile-wallet-transaction-amount ${item.direction === "credit" ? "is-credit" : "is-debit"}">
+              ${item.direction === "credit" ? "+" : "-"}${formatCompact(item.amount)}
+            </div>
+          </div>
+        `)
+        .join("")
+      : `
+        <div class="profile-wallet-empty">
+          No wallet transactions yet.
+        </div>
+      `;
+  }
+
+  if (walletUnsupported && els.profileWalletTransactions) {
+    els.profileWalletTransactions.innerHTML = `
+      <div class="profile-wallet-empty">
+        Wallet history will appear here after the backend wallet rollout is applied.
+      </div>
+    `;
+  }
 }
 
 function openDetailById(postId) {
@@ -1105,11 +4291,792 @@ function openDetailById(postId) {
   void loadDetailData(postId);
 }
 
+function renderDetailOdds() {
+  clearCountdownTimers("detail-");
+  const post = state.currentDetailPost;
+  if (!post || !els.detailOddsModule) {
+    return;
+  }
+
+  const postBettingReady = FEATURE_GATES.postMarketWrites && state.postBetFeatureStatus !== "unsupported";
+  const roastPrediction = state.detailPredictions.find((item) => item.prediction_type === "get_roasted");
+  const hotPrediction = state.detailPredictions.find((item) => item.prediction_type === "hot_24h");
+  const flamePrediction = state.detailPredictions.find((item) => item.prediction_type === "flamewar");
+  const primaryPrediction = hotPrediction ?? flamePrediction ?? roastPrediction;
+  const marketType = getPrimaryDetailMarketType(post, state.detailPredictions);
+  const marketDeadline = resolveMarketDeadline({ post, prediction: primaryPrediction, marketType });
+  const yesProbability = clampNumber(Math.round(primaryPrediction?.probability ?? post.hot_probability ?? 52), 6, 94);
+  const noProbability = 100 - yesProbability;
+  const marketQuestion = marketType === "flamewar"
+    ? "Will this post trigger a flame-war?"
+    : marketType === "get_roasted"
+      ? "Will this post get roasted by the community?"
+      : "Will this post go viral in 24 hours?";
+  const marketLabel = marketType === "flamewar"
+    ? "Flame-War Market"
+    : marketType === "get_roasted"
+      ? "Roast Risk Market"
+      : "Hot Market";
+  const supportBoardSignal = findSupportBoardSignal(state.supportBoardItems, post.id, marketType);
+  const lensInsight = readLensAgentInsight(post, {
+    supportBoardSignal,
+  });
+  const detailSupportTrendMarkup = renderDetailSupportTrend({
+    post,
+    marketType,
+    supportBoardSignal,
+    fallbackRate: yesProbability,
+  });
+  const lockedSide = getMarketPositionSide(state.detailUserBets, marketType);
+  const ownPostLocked = isCurrentUserPostAuthor(post);
+  const sideStatusText = ownPostLocked ? getOwnPostMarketLockMessage() : getMarketSideStatusText(lockedSide);
+  const yesBlocked = ownPostLocked || isMarketSideBlocked(lockedSide, "yes");
+  const noBlocked = ownPostLocked || isMarketSideBlocked(lockedSide, "no");
+  const yesButtonText = lockedSide === "yes" ? "追加 YES · 50 oute" : "站队 YES · 50 oute";
+  const noButtonText = lockedSide === "no" ? "追加 NO · 50 oute" : "站队 NO · 50 oute";
+  const yesDisabledAttr = yesBlocked ? ` disabled title="${escapeAttribute(sideStatusText)}"` : "";
+  const noDisabledAttr = noBlocked ? ` disabled title="${escapeAttribute(sideStatusText)}"` : "";
+
+  const oddsCards = [
+    { label: "爆帖概率", value: `${Math.round(hotPrediction?.probability ?? post.hot_probability ?? 0)}%`, cls: "red", oddsValue: Number(hotPrediction?.odds_value ?? post.hot_odds ?? 1.8) },
+    { label: "引战概率", value: `${Math.round(flamePrediction?.probability ?? post.flamewar_probability ?? 0)}%`, cls: "orange", oddsValue: Number(flamePrediction?.odds_value ?? 2.2) },
+    { label: "被喷风险", value: `${Math.round(roastPrediction?.probability ?? 0)}%`, cls: "green", oddsValue: Number(roastPrediction?.odds_value ?? 2.6) },
+  ];
+
+  if (!supportsSupportBoard(post)) {
+    els.detailOddsModule.innerHTML = `
+      <div class="odds-title">
+        ${boltIcon()}
+        热度分析
+      </div>
+      <div class="odds-grid">
+        ${oddsCards.map((item) => `
+          <div class="odds-item">
+            <div class="odds-label">${escapeHtml(item.label)}</div>
+            <div class="odds-value ${item.cls}">${escapeHtml(item.value)}</div>
+          </div>
+        `).join("")}
+      </div>
+      ${renderLensAgentDetailCard(lensInsight)}
+      <div class="support-opt-out-note">这篇帖子发布时没有勾选“参与支持率排行”，因此不会进入 Live Support Board，也不能参与 YES / NO 站队市场。</div>
+      ${state.detailPredictions.slice(0, 3).map((item) => `
+        <div class="agent-predict" style="margin-top:14px">
+          <div class="agent-predict-avatar">${item.is_ai_agent ? "🤖" : "📡"}</div>
+          <div class="agent-predict-main">
+            <div class="agent-predict-name">${escapeHtml(item.predictor_name || "Arena Pulse")} · ${escapeHtml(item.prediction_label)} <span class="ai-disclosure">${escapeHtml(item.predictor_badge || "")}</span></div>
+            <div class="agent-predict-text">${escapeHtml(item.headline)}${item.predictor_disclosure ? ` · ${escapeHtml(item.predictor_disclosure)}` : ""}</div>
+          </div>
+        </div>
+      `).join("")}
+    `;
+    return;
+  }
+
+  els.detailOddsModule.innerHTML = `
+    <div class="odds-title">
+      ${boltIcon()}
+      odds 分析
+    </div>
+    <div class="odds-grid">
+      ${oddsCards.map((item) => `
+        <div class="odds-item">
+          <div class="odds-label">${escapeHtml(item.label)}</div>
+          <div class="odds-value ${item.cls}">${escapeHtml(item.value)}</div>
+          <div class="prediction-meta-row" style="margin-top:12px;justify-content:center">
+            <span class="prediction-odds-chip">${Number(item.oddsValue || 0).toFixed(2)}x</span>
+          </div>
+        </div>
+      `).join("")}
+    </div>
+    ${renderLensAgentDetailCard(lensInsight)}
+    <div class="post-market-shell" data-countdown-key="detail-${escapeAttribute(post.id || "active")}" data-market-deadline="${escapeAttribute(marketDeadline || "")}">
+      <div class="post-market-header">
+        <div>
+          <div class="post-market-kicker">${escapeHtml(marketLabel)}</div>
+          <div class="post-market-question">${escapeHtml(marketQuestion)}</div>
+          <div class="post-market-sub">YES / NO 会扣除钱包 oute，并按下注时 odds 锁定结算倍率。</div>
+        </div>
+        <div class="post-market-balance">
+          <span>Stake</span>
+              <strong>50 oute</strong>
+        </div>
+      </div>
+      ${renderCountdownMarkup()}
+      <div class="post-market-track-wrap">
+        <div class="post-market-track">
+          <div class="post-market-fill yes" style="width:${yesProbability}%">YES ${yesProbability}%</div>
+          <div class="post-market-fill no" style="width:${noProbability}%">NO ${noProbability}%</div>
+        </div>
+      </div>
+      ${detailSupportTrendMarkup}
+      <div class="post-market-buttons">
+        <button class="post-market-bet-btn primary" type="button" data-action="stake-post-side" data-market-type="${marketType}" data-side="yes" data-stake="50"${yesDisabledAttr}>${yesButtonText}</button>
+        <button class="post-market-bet-btn" type="button" data-action="stake-post-side" data-market-type="${marketType}" data-side="no" data-stake="50"${noDisabledAttr}>${noButtonText}</button>
+      </div>
+    </div>
+    ${state.detailPredictions.slice(0, 3).map((item) => `
+      <div class="agent-predict" style="margin-top:14px">
+        <div class="agent-predict-avatar">${item.is_ai_agent ? "🤖" : "📡"}</div>
+        <div class="agent-predict-main">
+          <div class="agent-predict-name">${escapeHtml(item.predictor_name || "Arena Pulse")} · ${escapeHtml(item.prediction_label)} <span class="ai-disclosure">${escapeHtml(item.predictor_badge || "")}</span></div>
+          <div class="agent-predict-text">${escapeHtml(item.headline)}${item.predictor_disclosure ? ` · ${escapeHtml(item.predictor_disclosure)}` : ""}</div>
+          <div class="prediction-meta-row">
+            <span class="prediction-odds-chip">${Math.round(item.probability || 0)}% · ${Number(item.odds_value || 0).toFixed(2)}x · ${escapeHtml(item.status || "open")}</span>
+          </div>
+        </div>
+      </div>
+    `).join("")}
+    <div class="odds-write-hint">这里是帖子本身的 YES / NO 站队市场，不是预测卡片。前端会优先尝试真实后端写入接口；如果后端帖子投注端点还没上线，会明确提示。</div>
+    ${renderDetailMarketPosition({ post, marketType, marketDeadline })}
+    <div class="inline-status" id="detailOddsStatus">${escapeHtml(sideStatusText)}</div>
+  `;
+
+  els.detailOddsModule.querySelectorAll('[data-action="stake-post-side"]').forEach((button) => {
+    if (!postBettingReady) {
+      button.disabled = true;
+      const statusEl = els.detailOddsModule?.querySelector("#detailOddsStatus");
+      if (statusEl && !statusEl.textContent.trim()) {
+        statusEl.textContent = "Current backend has not enabled post-market writes yet.";
+      }
+    }
+
+    button.addEventListener("click", () => {
+      void handlePostSideStake(button);
+    });
+  });
+
+  els.detailOddsModule.querySelector('[data-action="claim-post-market-reward"]')?.addEventListener("click", () => {
+    void claimPostMarketRewards({
+      postId: post.id,
+      marketType,
+    });
+  });
+
+  bindMarketCountdowns(els.detailOddsModule);
+}
+
+function renderDetailSupportTrend({
+  post,
+  marketType,
+  supportBoardSignal,
+  fallbackRate,
+}) {
+  if (!supportsSupportBoard(post)) {
+    return "";
+  }
+
+  const hasDetailTrend = state.detailPostId === post?.id
+    && state.detailSupportBoardMarketType === marketType
+    && state.detailSupportBoardItem;
+  const trendItem = hasDetailTrend ? state.detailSupportBoardItem : supportBoardSignal ?? {
+    post_id: post?.id || "detail-post",
+    market_type: marketType || SUPPORT_BOARD_DEFAULTS.marketType,
+    yes_rate: fallbackRate,
+    total_amount_total: 0,
+  };
+  const trendSeries = hasDetailTrend
+    ? state.detailSupportBoardSeries
+    : supportBoardSignal
+      ? getSupportBoardSeries(supportBoardSignal)
+      : [];
+
+  return renderSupportBoardDetailTrend({
+    series: trendSeries,
+    item: trendItem,
+    fallbackRate,
+    className: "post-market-trend",
+    clampNumber,
+    formatCompact,
+    escapeHtml,
+  });
+}
+
+function renderDetailMarketPosition({ post, marketType, marketDeadline }) {
+  const position = summarizeMarketPosition(state.detailUserBets, marketType);
+  if (!state.user || position.count === 0) {
+    return "";
+  }
+
+  const countdownSnapshot = getMarketCountdownSnapshot(marketDeadline);
+
+  return `
+    <div class="support-opt-out-note">
+      <strong style="display:block;margin-bottom:8px;color:var(--text-primary)">我的 odds 仓位</strong>
+      <div>YES ${formatCompact(position.yesStake)} oute · NO ${formatCompact(position.noStake)} oute · 已投入 ${formatCompact(position.totalStaked)} oute</div>
+      <div style="margin-top:6px">按下注时锁定的 odds 估算，最高可结算 ${formatCompact(position.potentialPayout)} oute。</div>
+      ${position.claimedPayout > 0 ? `<div style="margin-top:6px">已结算到钱包：${formatCompact(position.claimedPayout)} oute</div>` : ""}
+      ${countdownSnapshot.expired && position.unsettledCount > 0
+        ? `<button class="post-market-bet-btn primary" type="button" data-action="claim-post-market-reward" style="margin-top:12px">结算 odds 奖励</button>`
+        : countdownSnapshot.expired
+          ? `<div style="margin-top:8px">这场市场已经完成结算。</div>`
+          : `<div style="margin-top:8px">市场结束后可在这里领取结算奖励。</div>`}
+    </div>
+  `;
+}
+
+function renderCountdownMarkup({ compact = false } = {}) {
+  const compactClass = compact ? " compact" : "";
+  return `
+    <div class="market-countdown${compactClass}">
+      <span class="market-countdown-label">倒计时</span>
+      <span class="market-countdown-value">--:--:--</span>
+      <span class="market-countdown-status">待同步</span>
+    </div>
+  `;
+}
+
+function bindMarketCountdowns(root) {
+  if (!root) {
+    return;
+  }
+
+  ensureMarketCountdownStyles();
+  root.querySelectorAll("[data-countdown-key]").forEach((container) => {
+    setupMarketCountdown(container);
+  });
+}
+
+function setupMarketCountdown(container) {
+  const countdownKey = container?.dataset?.countdownKey;
+  if (!countdownKey) {
+    return;
+  }
+
+  clearCountdownTimer(countdownKey);
+
+  const deadline = container.dataset.marketDeadline || "";
+  const valueEl = container.querySelector(".market-countdown-value");
+  const statusEl = container.querySelector(".market-countdown-status");
+  const buttons = [...container.querySelectorAll('[data-action="stake-post-side"], [data-action="feed-post-side"]')];
+
+  buttons.forEach((button) => {
+    if (!button.dataset.countdownLocked) {
+      button.dataset.countdownLocked = button.disabled ? "true" : "false";
+    }
+  });
+
+  const applySnapshot = () => {
+    const snapshot = getMarketCountdownSnapshot(deadline);
+
+    if (valueEl) {
+      valueEl.textContent = snapshot.valueText;
+    }
+
+    if (statusEl) {
+      statusEl.textContent = snapshot.statusText;
+    }
+
+    container.classList.toggle("is-market-ended", snapshot.expired);
+    container.classList.toggle("is-market-live", snapshot.live);
+    container.classList.toggle("is-market-pending", snapshot.pending);
+
+    buttons.forEach((button) => {
+      if (snapshot.expired) {
+        button.disabled = true;
+        button.title = "This market has closed.";
+        return;
+      }
+
+      if (button.dataset.countdownLocked !== "true") {
+        button.disabled = false;
+      }
+
+      button.title = "";
+    });
+
+    if (snapshot.expired || snapshot.pending) {
+      clearCountdownTimer(countdownKey);
+    }
+  };
+
+  const initialSnapshot = getMarketCountdownSnapshot(deadline);
+  applySnapshot();
+
+  if (initialSnapshot.expired || initialSnapshot.pending) {
+    return;
+  }
+
+  const timerId = window.setInterval(applySnapshot, 1000);
+  state.countdownTimers.set(countdownKey, timerId);
+}
+
+function clearCountdownTimer(countdownKey) {
+  const timerId = state.countdownTimers.get(countdownKey);
+  if (typeof timerId === "number") {
+    window.clearInterval(timerId);
+  }
+  state.countdownTimers.delete(countdownKey);
+}
+
+function clearCountdownTimers(prefix = "") {
+  [...state.countdownTimers.keys()]
+    .filter((key) => !prefix || key.startsWith(prefix))
+    .forEach((key) => {
+      clearCountdownTimer(key);
+    });
+}
+
+function resolveMarketDeadline({ post, prediction = null, marketType = "hot_24h" } = {}) {
+  const explicitDeadline = findExplicitMarketDeadline(prediction) || findExplicitMarketDeadline(post);
+  if (explicitDeadline) {
+    return explicitDeadline;
+  }
+
+  const createdAtMs = parseTimestamp(post?.created_at);
+  if (createdAtMs == null) {
+    return "";
+  }
+
+  const fallbackWindowMs = marketType === "hot_24h"
+    ? MARKET_COUNTDOWN_FALLBACK_MS
+    : MARKET_COUNTDOWN_FALLBACK_MS;
+
+  return new Date(createdAtMs + fallbackWindowMs).toISOString();
+}
+
+function findExplicitMarketDeadline(source) {
+  if (!source || typeof source !== "object") {
+    return "";
+  }
+
+  for (const field of MARKET_DEADLINE_FIELDS) {
+    const value = source[field];
+    if (!value) {
+      continue;
+    }
+
+    const timestamp = parseTimestamp(value);
+    if (timestamp != null) {
+      return new Date(timestamp).toISOString();
+    }
+  }
+
+  return "";
+}
+
+function ensureMarketCountdownStyles() {
+  if (document.head?.querySelector("#market-countdown-style")) {
+    return;
+  }
+
+  const styleEl = document.createElement("style");
+  styleEl.id = "market-countdown-style";
+  styleEl.textContent = `
+    .market-countdown {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 14px;
+      padding: 10px 12px;
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 12px;
+      background: rgba(255,255,255,0.03);
+    }
+
+    .market-countdown.compact {
+      margin-top: 10px;
+      padding: 8px 10px;
+      border-radius: 10px;
+    }
+
+    .market-countdown-label,
+    .market-countdown-status {
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+
+    .market-countdown-value {
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      color: var(--text-primary);
+    }
+
+    .is-market-live .market-countdown-status {
+      color: var(--green);
+    }
+
+    .is-market-ended .market-countdown-status,
+    .is-market-ended .market-countdown-value {
+      color: var(--red);
+    }
+
+    .is-market-ended .post-market-bet-btn,
+    .is-market-ended .post-market-inline-btn {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+  `;
+
+  document.head.appendChild(styleEl);
+}
+
+async function handlePostSideStake(button) {
+  const statusEl = els.detailOddsModule?.querySelector("#detailOddsStatus");
+
+  if (!FEATURE_GATES.postMarketWrites) {
+    setStatus(statusEl, "Post-market writes are disabled on the current backend main contract.", "error");
+    return;
+  }
+
+  if (!state.user) {
+    setStatus(els.authStatus, "Please log in before choosing a side for this post.", "error");
+    setStatus(statusEl, "Please log in before choosing a side for this post.", "error");
+    navigate("auth");
+    return;
+  }
+
+  const marketType = button?.dataset?.marketType;
+  const side = button?.dataset?.side;
+  const stakeAmount = Number(button?.dataset?.stake || 50);
+  const post = state.currentDetailPost;
+
+  if (!post || !marketType || !side) {
+    setStatus(statusEl, "This post side-selection data is outdated. Please refresh and try again.", "error");
+    return;
+  }
+
+  if (isCurrentUserPostAuthor(post)) {
+    setStatus(statusEl, getOwnPostMarketLockMessage(), "error");
+    return;
+  }
+
+  if (!supportsSupportBoard(post)) {
+    setStatus(statusEl, "该帖子没有参与支持率排行，无法站队。", "error");
+    return;
+  }
+
+  const lockedSide = getMarketPositionSide(state.detailUserBets, marketType);
+  if (isMarketSideBlocked(lockedSide, side)) {
+    setStatus(statusEl, getMarketSideStatusText(lockedSide), "error");
+    return;
+  }
+
+  button.disabled = true;
+  button.classList.add("is-loading");
+  setStatus(statusEl, "正在提交站队...", "");
+
+  const result = await submitPostBet({ post, marketType, side, stakeAmount });
+
+  button.classList.remove("is-loading");
+  button.disabled = false;
+
+  if (!result.ok) {
+    setStatus(statusEl, result.message, "error");
+    return;
+  }
+
+  await Promise.allSettled([
+    refreshWalletModule(),
+    loadHomepageData(),
+    state.detailPostId === post.id ? loadDetailData(post.id) : Promise.resolve(),
+  ]);
+
+  pulseElement(button);
+  spawnBurstParticles(button, {
+    className: "is-coin",
+    glyphs: ["oute", "oute", "+", "+1"],
+    count: 8,
+    spreadX: 160,
+    minY: -150,
+    maxY: -45,
+    sizeMin: 11,
+    sizeMax: 14,
+    endScale: 0.76,
+  });
+  triggerOuteRainBurst();
+  setStatus(statusEl, result.message, "success");
+}
+
+async function handleFeedPostSideStake(button) {
+  const postId = button?.dataset?.postId;
+  const marketType = button?.dataset?.marketType;
+  const side = button?.dataset?.side;
+  const stakeAmount = Number(button?.dataset?.stake || 50);
+  const statusEl = postId ? document.getElementById(`feedPostStatus-${postId}`) : null;
+  const post = state.posts.find((item) => item.id === postId);
+
+  if (!FEATURE_GATES.postMarketWrites) {
+    setStatus(statusEl, "Post-market writes are disabled on the current backend main contract.", "error");
+    return;
+  }
+
+  if (!state.user) {
+    setStatus(els.authStatus, "Please log in before choosing a side for this post.", "error");
+    setStatus(statusEl, "Please log in before choosing a side for this post.", "error");
+    navigate("auth");
+    return;
+  }
+
+  if (!post || !marketType || !side) {
+    setStatus(statusEl, "This post side-selection data is outdated. Please refresh and try again.", "error");
+    return;
+  }
+
+  if (!supportsSupportBoard(post)) {
+    setStatus(statusEl, "该帖子没有参与支持率排行，无法站队。", "error");
+    return;
+  }
+
+  if (isCurrentUserPostAuthor(post)) {
+    setStatus(statusEl, getOwnPostMarketLockMessage(), "error");
+    return;
+  }
+
+  const lockedSide = getMarketPositionSide(getUserPostMarketBets(postId), marketType);
+  if (isMarketSideBlocked(lockedSide, side)) {
+    setStatus(statusEl, getMarketSideStatusText(lockedSide), "error");
+    return;
+  }
+
+  button.disabled = true;
+  button.classList.add("is-loading");
+  setStatus(statusEl, "正在提交站队...", "");
+
+  const result = await submitPostBet({ post, marketType, side, stakeAmount });
+
+  button.classList.remove("is-loading");
+  button.disabled = false;
+
+  if (!result.ok) {
+    setStatus(statusEl, result.message, "error");
+    return;
+  }
+
+  await Promise.allSettled([
+    refreshWalletModule(),
+    loadHomepageData(),
+    state.detailPostId === post.id ? loadDetailData(post.id) : Promise.resolve(),
+  ]);
+
+  pulseElement(button);
+  spawnBurstParticles(button, {
+    className: "is-coin",
+    glyphs: ["oute", "oute", "+", "+1"],
+    count: 7,
+    spreadX: 140,
+    minY: -130,
+    maxY: -40,
+    sizeMin: 11,
+    sizeMax: 14,
+    endScale: 0.76,
+  });
+  triggerOuteRainBurst();
+  setStatus(document.getElementById(`feedPostStatus-${postId}`) ?? statusEl, result.message, "success");
+}
+
+async function submitPostBet({ post, marketType, side, stakeAmount }) {
+  if (!FEATURE_GATES.postMarketWrites) {
+    state.postBetFeatureStatus = "unsupported";
+    return {
+      ok: false,
+      message: "Post-market writes are disabled on the current backend main contract.",
+    };
+  }
+
+  if (!state.supabase || !state.user) {
+    return {
+      ok: false,
+      message: "Please log in and configure Supabase first.",
+    };
+  }
+
+  if (!supportsSupportBoard(post)) {
+    return {
+      ok: false,
+      message: "该帖子没有参与支持率排行，无法站队。",
+    };
+  }
+
+  if (isCurrentUserPostAuthor(post)) {
+    return {
+      ok: false,
+      message: getOwnPostMarketLockMessage(),
+    };
+  }
+
+  const result = await tryPostBetRpc("place_post_bet", buildPlacePostBetPayload({
+    postId: post.id,
+    marketType,
+    side,
+    stakeAmount,
+    actorProfileId: state.user.id,
+  }));
+
+  if (result.ok) {
+    return {
+      ok: true,
+      message: toPostBetSuccessMessage({ side, marketType, stakeAmount }),
+    };
+  }
+
+  if (result.kind === "missing") {
+    state.postBetFeatureStatus = "unsupported";
+    renderFeed();
+    renderDetailOdds();
+
+    return {
+      ok: false,
+      message: "The wallet-backed odds endpoint is not live yet.",
+    };
+  }
+
+  return {
+    ok: false,
+    message: result.message,
+  };
+}
+
+async function claimPostMarketRewards({ postId, marketType }) {
+  const statusEl = els.detailOddsModule?.querySelector("#detailOddsStatus");
+
+  if (!state.user || !state.supabase) {
+    setStatus(statusEl, "请先登录后再结算 odds 奖励。", "error");
+    navigate("auth");
+    return;
+  }
+
+  setStatus(statusEl, "正在结算 odds 奖励...", "");
+
+  const { data, error } = await state.supabase.rpc("claim_post_market_rewards", {
+    p_post_id: postId,
+    p_market_type: marketType,
+    p_actor_profile_id: state.user.id,
+  });
+
+  if (error) {
+    setStatus(statusEl, mapPostBetError(error.message), "error");
+    return;
+  }
+
+  const result = data && typeof data === "object" ? data : {};
+  const message = toSettlementStatusMessage(result);
+
+  await Promise.allSettled([
+    refreshWalletModule(),
+    loadHomepageData(),
+    loadDetailData(postId),
+  ]);
+
+  setStatus(statusEl, message, "success");
+}
+
+async function tryPostBetRpc(functionName, payload) {
+  const { error } = await state.supabase.rpc(functionName, payload);
+
+  if (!error) {
+    return { ok: true };
+  }
+
+  return {
+    ok: false,
+    kind: classifyPostBetError(error.message),
+    message: mapPostBetError(error.message),
+  };
+}
+
 function toggleLbRow(row) {
   const wasExpanded = row.classList.contains("expanded");
   document.querySelectorAll(".lb-row.expanded").forEach((item) => item.classList.remove("expanded"));
   if (!wasExpanded) {
     row.classList.add("expanded");
+  }
+}
+
+function getLeaderboardContextKey() {
+  return `${state.leaderboardTab}:${state.leaderboardTime}`;
+}
+
+function setLeaderboardLiveStatus(text, tone = "idle") {
+  leaderboardMotion.setStatus(text, tone);
+}
+
+function debounce(fn, wait = 160) {
+  let timerId = 0;
+
+  return (...args) => {
+    window.clearTimeout(timerId);
+    timerId = window.setTimeout(() => fn(...args), wait);
+  };
+}
+
+function startLeaderboardLiveUpdates() {
+  if (!state.supabase || state.leaderboardRealtimeChannel) {
+    return;
+  }
+
+  const scheduleRefresh = debounce(() => {
+    void refreshLiveLeaderboard("live-update");
+  });
+
+  let channel = state.supabase.channel("leaderboard-live-rankings");
+  SUPPORT_BOARD_REALTIME_TABLES.forEach((table) => {
+    channel = channel.on(
+      "postgres_changes",
+      { event: "*", schema: "public", table },
+      () => scheduleRefresh(),
+    );
+  });
+
+  state.leaderboardRealtimeChannel = channel.subscribe((status) => {
+    if (status === "SUBSCRIBED") {
+      state.leaderboardRealtimeSubscribed = true;
+      setLeaderboardLiveStatus("Realtime sync connected", "live");
+      return;
+    }
+
+    if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+      state.leaderboardRealtimeSubscribed = false;
+      setLeaderboardLiveStatus("实时通道异常，已切换轮询", "polling");
+    }
+  });
+
+  state.leaderboardRefreshTimer = window.setInterval(() => {
+    void refreshLiveLeaderboard("poll");
+  }, LEADERBOARD_REFRESH_MS);
+}
+
+async function refreshLiveLeaderboard(reason = "poll") {
+  if (!state.supabase) {
+    return;
+  }
+
+  if (state.leaderboardRefreshInFlight) {
+    state.leaderboardRefreshPending = true;
+    return;
+  }
+
+  state.leaderboardRefreshInFlight = true;
+  const previousSupportBoardSignature = state.supportBoardRainSignature;
+
+  try {
+    await Promise.allSettled([
+      loadHomepageData({ render: false }),
+      loadLeaderboardData({ render: false }),
+    ]);
+
+    renderLiveSupportBoard();
+    const nextSupportBoardSignature = getSupportBoardRainSignature();
+    if (shouldTriggerSupportBoardRain({
+      previousSignature: previousSupportBoardSignature,
+      nextSignature: nextSupportBoardSignature,
+      reason,
+    })) {
+      triggerSupportBoardUpdateRain();
+    }
+    state.supportBoardRainSignature = nextSupportBoardSignature;
+    renderLeaderboard({
+      mode: "reorder",
+      reason,
+    });
+  } finally {
+    state.leaderboardRefreshInFlight = false;
+
+    if (state.leaderboardRefreshPending) {
+      state.leaderboardRefreshPending = false;
+      void refreshLiveLeaderboard(reason);
+    }
   }
 }
 
@@ -1142,7 +5109,7 @@ function toggleJoin(button) {
 
   const original = button.textContent;
   button.classList.add("joined");
-  button.textContent = "✓ 已参与";
+  button.textContent = "Joined";
   window.setTimeout(() => {
     button.textContent = original;
   }, 1500);
@@ -1191,18 +5158,18 @@ function setStatus(element, message, type = "") {
 
 function mapAuthError(message, mode) {
   if (message === "Invalid login credentials") {
-    return "邮箱或密码不对。请确认你输入的是注册邮箱，不是用户名。";
+    return "Incorrect email or password. Please use your registered email instead of a username.";
   }
 
   if (message?.includes("Email not confirmed")) {
-    return "这个账号还没完成邮箱验证。先去邮箱点确认链接，再回来登录。";
+    return "This account has not completed email verification yet.";
   }
 
   if (mode === "signup" && message?.includes("User already registered")) {
-    return "这个邮箱已经注册过了，直接切到登录即可。";
+    return "This email is already registered. Switch to login instead.";
   }
 
-  return message || "操作失败，请稍后再试。";
+  return message || "Operation failed. Please try again later.";
 }
 
 function computeHotScore(post) {
@@ -1218,11 +5185,11 @@ function renderHeatBadge(post, pinned = false) {
   }
 
   if (flamewar >= 55) {
-    return `<span class="heat-badge heat-fire"${pinned ? ' style="margin-left:auto"' : ""}>⚡ 引战概率 ${flamewar}%</span>`;
+    return `<span class="heat-badge heat-fire"${pinned ? ' style="margin-left:auto"' : ""}>⚔ 引战概率 ${flamewar}%</span>`;
   }
 
   if (post.hot_odds) {
-    return `<span class="heat-badge heat-cool"${pinned ? ' style="margin-left:auto"' : ""}>赔率 ${Number(post.hot_odds).toFixed(2)}x</span>`;
+    return `<span class="heat-badge heat-cool"${pinned ? ' style="margin-left:auto"' : ""}>odds ${Number(post.hot_odds).toFixed(2)}x</span>`;
   }
 
   return "";
@@ -1233,14 +5200,6 @@ function renderParagraphs(text) {
     .split(/\n{2,}/)
     .map((part) => `<p>${escapeHtml(part).replace(/\n/g, "<br>")}</p>`)
     .join("<br>");
-}
-
-function renderPostImage(imageUrl) {
-  if (!imageUrl) {
-    return "";
-  }
-
-  return `<div class="post-image-placeholder" style="padding:0;overflow:hidden"><img src="${escapeAttribute(imageUrl)}" alt="post" style="width:100%;display:block;max-height:220px;object-fit:cover"></div>`;
 }
 
 function renderAvatar(className, imageUrl, label) {
@@ -1264,16 +5223,16 @@ function formatRelativeTime(value) {
   const minutes = Math.max(1, Math.floor(diff / 60000));
 
   if (minutes < 60) {
-    return `${minutes} 分钟前`;
+    return `${minutes} minutes ago`;
   }
 
   const hours = Math.floor(minutes / 60);
   if (hours < 24) {
-    return `${hours} 小时前`;
+    return `${hours} hours ago`;
   }
 
   const days = Math.floor(hours / 24);
-  return `${days} 天前`;
+  return `${days} days ago`;
 }
 
 function formatDate(value) {
@@ -1292,6 +5251,33 @@ function formatCompact(value) {
   }).format(Number(value || 0));
 }
 
+function renderSupportBoardSparkline(series, fallbackRate = 50) {
+  const points = series.length > 0 ? series : createFallbackSupportSeries({ yes_rate: fallbackRate });
+  const lastPoint = points[points.length - 1] ?? { yes_rate: fallbackRate };
+  const polyline = points.map((point, index) => {
+    const x = points.length === 1 ? 56 : (index / (points.length - 1)) * 112;
+    const y = 26 - (clampNumber(Number(point.yes_rate ?? fallbackRate), 0, 100) / 100) * 20;
+    return `${x.toFixed(2)},${y.toFixed(2)}`;
+  }).join(" ");
+  const lastX = points.length === 1 ? 56 : 112;
+  const lastY = 26 - (clampNumber(Number(lastPoint.yes_rate ?? fallbackRate), 0, 100) / 100) * 20;
+
+  return `
+    <svg viewBox="0 0 112 28" width="112" height="28" aria-hidden="true" focusable="false">
+      <path d="M0 26.5 H112" stroke="rgba(255,255,255,0.12)" stroke-width="1" fill="none"></path>
+      <polyline
+        points="${polyline}"
+        fill="none"
+        stroke="rgba(124, 255, 203, 0.95)"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      ></polyline>
+      <circle cx="${lastX}" cy="${lastY.toFixed(2)}" r="2.5" fill="rgba(124, 255, 203, 1)"></circle>
+    </svg>
+  `;
+}
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -1299,6 +5285,10 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+function escapeRegExp(value) {
+  return String(value ?? "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function escapeAttribute(value) {
@@ -1338,6 +5328,10 @@ function bookmarkIcon() {
 
 function shareIcon() {
   return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>';
+}
+
+function trashIcon() {
+  return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>';
 }
 
 function boltIcon() {

@@ -38,6 +38,11 @@ if (malformedClosingTags.length > 0) {
   errors.push(`Possible malformed closing tags found: ${malformedClosingTags.length}`);
 }
 
+const malformedAppClosingTags = [...appSource.matchAll(/(^|[^<])\/(a|div|span|button|h[1-6]|p|section|nav|main|form)>/gim)];
+if (malformedAppClosingTags.length > 0) {
+  errors.push(`Possible malformed closing tags found in app.mjs templates: ${malformedAppClosingTags.length}`);
+}
+
 if (!existsSync(appPath)) {
   errors.push("Missing front/app.mjs");
 } else {

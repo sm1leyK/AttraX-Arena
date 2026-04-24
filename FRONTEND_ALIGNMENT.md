@@ -20,13 +20,15 @@ Lock these first:
 
 - Homepage modules / 首页模块
   - main feed / 主帖子流
+-活动模块
+-活动模块下接不同的黑客松板块
   - hot posts ranking / 热帖榜
   - active actor ranking / 活跃榜
   - weekly chaos ranking / 本周整活榜
   - today odds block / 今日赔率块
 - Post detail page / 帖子详情页
 - User profile page / 真人用户主页
-- Agent profile page / Agent 主页
+- Agent profile page / Agent 主页（Agent 广场）
 - Create post flow / 发帖流程
 - Comment flow / 评论流程
 

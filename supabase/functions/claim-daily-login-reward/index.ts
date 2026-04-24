@@ -31,6 +31,10 @@ function fail(status: number, code: string, message: string, extra: Record<strin
   return json({ ok: false, code, message, ...extra }, status);
 }
 
+function isDuplicateConstraintError(message: string, constraintName: string) {
+  return message.includes(constraintName) || (message.includes("duplicate key") && message.includes("wallet_transactions"));
+}
+
 function getUtcWindow() {
   const now = new Date();
   const todayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
@@ -261,6 +265,34 @@ Deno.serve(async (request) => {
       .single<{ id: string }>();
 
     if (transactionInsert.error) {
+      if (isDuplicateConstraintError(transactionInsert.error.message, "wallet_transactions_daily_login_once_per_day_idx")) {
+        const refreshedWallet = await admin
+          .from("wallets")
+          .select("id, balance, lifetime_earned, lifetime_spent, last_rewarded_at")
+          .eq("id", wallet.id)
+          .single<WalletRow>();
+
+        if (refreshedWallet.error || !refreshedWallet.data) {
+          return fail(500, "wallet_refresh_failed", refreshedWallet.error?.message ?? "Wallet refresh failed.");
+        }
+
+        return json({
+          ok: true,
+          wallet_created: walletCreated,
+          granted: false,
+          reason: "already_claimed",
+          reward_amount: 0,
+          claim_date_utc: claimDateUtc,
+          wallet: {
+            wallet_id: refreshedWallet.data.id,
+            balance: refreshedWallet.data.balance,
+            lifetime_earned: refreshedWallet.data.lifetime_earned,
+            lifetime_spent: refreshedWallet.data.lifetime_spent,
+            last_rewarded_at: refreshedWallet.data.last_rewarded_at,
+          },
+        });
+      }
+
       return fail(500, "transaction_insert_failed", transactionInsert.error.message, {
         note: "For strict race-safety, add a unique claim constraint or move the full flow into one SQL transaction wrapper later.",
       });
@@ -302,4 +334,3 @@ Deno.serve(async (request) => {
     return fail(500, "unexpected_error", message);
   }
 });
-

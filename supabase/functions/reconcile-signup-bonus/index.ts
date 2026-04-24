@@ -39,6 +39,10 @@ function fail(status: number, code: string, message: string, extra: Record<strin
   );
 }
 
+function isDuplicateConstraintError(message: string, constraintName: string) {
+  return message.includes(constraintName) || (message.includes("duplicate key") && message.includes("wallet_transactions"));
+}
+
 async function getAuthenticatedUser(request: Request) {
   const authHeader = request.headers.get("Authorization");
   if (!authHeader) {
@@ -252,6 +256,33 @@ Deno.serve(async (request) => {
       .single<{ id: string }>();
 
     if (transactionInsert.error) {
+      if (isDuplicateConstraintError(transactionInsert.error.message, "wallet_transactions_signup_bonus_once_idx")) {
+        const refreshedWallet = await admin
+          .from("wallets")
+          .select("id, balance, lifetime_earned, lifetime_spent, last_rewarded_at")
+          .eq("id", wallet.id)
+          .single<WalletRow>();
+
+        if (refreshedWallet.error || !refreshedWallet.data) {
+          return fail(500, "wallet_refresh_failed", refreshedWallet.error?.message ?? "Wallet refresh failed.");
+        }
+
+        return json({
+          ok: true,
+          wallet_created: walletCreated,
+          reward_granted: false,
+          reason: "already_granted",
+          reward_amount: 0,
+          wallet: {
+            wallet_id: refreshedWallet.data.id,
+            balance: refreshedWallet.data.balance,
+            lifetime_earned: refreshedWallet.data.lifetime_earned,
+            lifetime_spent: refreshedWallet.data.lifetime_spent,
+            last_rewarded_at: refreshedWallet.data.last_rewarded_at,
+          },
+        });
+      }
+
       return fail(500, "transaction_insert_failed", transactionInsert.error.message, {
         note: "For strict race-safety, add a unique constraint or move the full flow into one SQL transaction wrapper later.",
       });
@@ -292,4 +323,3 @@ Deno.serve(async (request) => {
     return fail(500, "unexpected_error", message);
   }
 });
-
