@@ -122,7 +122,7 @@ Primary files:
 
 ### QA / 测试
 
-- [ ] Create `QA_TEST_LOG.md` / 创建 `QA_TEST_LOG.md`
+- [x] Create `QA_TEST_LOG.md` / 创建 `QA_TEST_LOG.md`
 - [ ] Test homepage feed loading / 测试首页帖子流
 - [ ] Test hot ranking loading / 测试热帖榜
 - [ ] Test active actor ranking loading / 测试活跃榜
@@ -135,23 +135,23 @@ Primary files:
 
 ### Demo / 演示
 
-- [ ] Create `DEMO_SCRIPT.md` / 创建 `DEMO_SCRIPT.md`
-- [ ] Write 1-sentence product pitch / 写一句话产品介绍
-- [ ] Write 3-minute demo flow / 写 3 分钟演示流程
-- [ ] Prepare key demo moments / 准备演示高光点
-- [ ] Explain Agent users clearly / 讲清楚 Agent 用户
-- [ ] Explain joke odds as entertainment prediction / 讲清楚搞笑赔率是娱乐预测
+- [x] Create `DEMO_SCRIPT.md` / 创建 `DEMO_SCRIPT.md`
+- [x] Write 1-sentence product pitch / 写一句话产品介绍
+- [x] Write 3-minute demo flow / 写 3 分钟演示流程
+- [x] Prepare key demo moments / 准备演示高光点
+- [x] Explain Agent users clearly / 讲清楚 Agent 用户
+- [x] Explain joke odds as entertainment prediction / 讲清楚搞笑赔率是娱乐预测
 
 ### Content and Privacy / 内容与隐私
 
-- [ ] Create `DEMO_CONTENT_CN.md` / 创建 `DEMO_CONTENT_CN.md`
-- [ ] Improve Chinese demo posts / 优化中文演示帖子
-- [ ] Improve Agent persona copy / 优化 Agent 人设文案
-- [ ] Create `PRIVACY_SECURITY_NOTES.md` / 创建 `PRIVACY_SECURITY_NOTES.md`
-- [ ] Explain minimal data collection / 说明数据最小化
-- [ ] Explain Agent transparency / 说明 Agent 透明标识
-- [ ] Explain RLS and permission control / 说明 RLS 和权限控制
-- [ ] Explain why odds are not gambling / 说明为什么不是赌博
+- [x] Create `DEMO_CONTENT_CN.md` / 创建 `DEMO_CONTENT_CN.md`
+- [x] Improve Chinese demo posts / 优化中文演示帖子
+- [x] Improve Agent persona copy / 优化 Agent 人设文案
+- [x] Create `PRIVACY_SECURITY_NOTES.md` / 创建 `PRIVACY_SECURITY_NOTES.md`
+- [x] Explain minimal data collection / 说明数据最小化
+- [x] Explain Agent transparency / 说明 Agent 透明标识
+- [x] Explain RLS and permission control / 说明 RLS 和权限控制
+- [x] Explain why odds are not gambling / 说明为什么不是赌博
 
 ## 6. File Ownership Rules / 文件归属规则
 

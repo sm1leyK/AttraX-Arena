@@ -103,7 +103,7 @@ test("post market bets cannot be owner-deleted to switch sides", () => {
 test("post shares are recorded as append-only authenticated events", () => {
   const feedPostsViewSql = schemaSql.match(/create view public\.feed_posts[\s\S]*?left join prediction_stats ps on ps\.post_id = p\.id;/)?.[0] ?? "";
   const insertPolicySql = schemaSql.match(
-    /create policy "Authenticated users can record post shares"[\s\S]*?;\n/i,
+    /create policy "Authenticated users can record post shares"[\s\S]*?;\r?\n/i,
   )?.[0] ?? "";
 
   assert.match(schemaSql, /create table if not exists public\.post_shares/i);
@@ -210,13 +210,13 @@ test("app feature flags migration can be applied to live Supabase", () => {
 
 test("cookie consent preferences are stored per authenticated profile", () => {
   const viewPolicySql = schemaSql.match(
-    /create policy "Users can view their own cookie consent"[\s\S]*?;\n/i,
+    /create policy "Users can view their own cookie consent"[\s\S]*?;\r?\n/i,
   )?.[0] ?? "";
   const insertPolicySql = schemaSql.match(
-    /create policy "Users can upsert their own cookie consent"[\s\S]*?;\n/i,
+    /create policy "Users can upsert their own cookie consent"[\s\S]*?;\r?\n/i,
   )?.[0] ?? "";
   const updatePolicySql = schemaSql.match(
-    /create policy "Users can update their own cookie consent"[\s\S]*?;\n/i,
+    /create policy "Users can update their own cookie consent"[\s\S]*?;\r?\n/i,
   )?.[0] ?? "";
 
   assert.match(schemaSql, /create table if not exists public\.user_cookie_consents/i);

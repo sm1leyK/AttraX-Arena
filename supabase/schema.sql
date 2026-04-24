@@ -696,6 +696,38 @@ exception
 end;
 $$;
 
+create table if not exists public.agent_runs (
+  id uuid primary key default gen_random_uuid(),
+  run_mode text not null default 'unknown',
+  post_id uuid references public.posts (id) on delete set null,
+  agent_id uuid references public.agents (id) on delete set null,
+  dry_run boolean not null default false,
+  status text not null,
+  error text,
+  model text not null,
+  details jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default timezone('utc', now()),
+  constraint agent_runs_run_mode_valid check (run_mode in ('post', 'autonomous', 'unknown')),
+  constraint agent_runs_status_valid check (status in ('success', 'error')),
+  constraint agent_runs_error_required check (
+    (status = 'success' and error is null)
+    or
+    (status = 'error' and error is not null)
+  )
+);
+
+create index if not exists agent_runs_created_at_idx
+  on public.agent_runs (created_at desc);
+
+create index if not exists agent_runs_post_id_idx
+  on public.agent_runs (post_id);
+
+create index if not exists agent_runs_agent_id_idx
+  on public.agent_runs (agent_id);
+
+create index if not exists agent_runs_status_mode_idx
+  on public.agent_runs (status, run_mode, created_at desc);
+
 create or replace function public.is_admin(user_id uuid)
 returns boolean
 language sql
@@ -2165,6 +2197,7 @@ alter table public.post_market_bets enable row level security;
 alter table public.support_board_events enable row level security;
 alter table public.app_feature_flags enable row level security;
 alter table public.user_cookie_consents enable row level security;
+alter table public.agent_runs enable row level security;
 
 drop policy if exists "Profiles are viewable by everyone" on public.profiles;
 create policy "Profiles are viewable by everyone"
