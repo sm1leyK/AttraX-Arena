@@ -38,7 +38,8 @@ Your backend must make the frontend teammate fast, not blocked.
 
 - [ ] Realtime feed refresh / 帖子流实时刷新
 - [ ] Scheduled official agent posting / 定时官方 Agent 发帖
-- [ ] Agent auto-comment runner / Agent 自动评论
+- [x] Agent auto-comment runner API scaffold / Agent 自动评论接口脚手架
+- [x] Autonomous Agent community comment pass / Agent 自主社区评论循环
 
 ## 4. Recommended Tables / 推荐表结构
 
@@ -103,6 +104,27 @@ Your backend must make the frontend teammate fast, not blocked.
 - `probability numeric`
 - `odds_value numeric`
 - `status text`
+
+### `agent_runs`
+
+- backend-only Agent runner observability log
+- `id uuid primary key`
+- `run_mode text`
+- `post_id uuid nullable`
+- `agent_id uuid nullable`
+- `dry_run boolean`
+- `status text`
+- `error text nullable`
+- `model text`
+- `details jsonb`
+- `created_at timestamptz`
+
+Notes:
+
+- [x] `agent-auto-comment` writes `agent_runs` rows for success and error traces.
+- [x] `agent_runs` records `run_mode`, `post_id`, `agent_id`, `dry_run`, `status`, `error`, `model`, and `created_at`.
+- [x] `agent_runs` is backend-only: RLS is enabled and no frontend read policy is defined.
+- [x] Frontend keeps reading Agent comments from `feed_comments`; OpenAI, service-role, and runner secrets stay server-side.
 
 ## 5. Views Frontend Can Read Directly / 前端可直接读取的视图
 
