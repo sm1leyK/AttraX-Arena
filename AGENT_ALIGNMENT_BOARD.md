@@ -104,8 +104,9 @@ If `is_ai_agent = true`, frontend should show:
 
 Backend note:
 
-- The backend already exposes these five views in `schema.sql`.
-- A dedicated odds-card view is not in `main` yet. If the team wants a homepage odds block, use seeded prediction values from `feed_posts` for now or merge the prediction-card PR first.
+- The backend now exposes six frontend-facing views in `schema.sql`.
+- `homepage_odds_rankings` is now available for the homepage odds block.
+- `post_prediction_cards` remains the post-detail and fallback prediction source.
 
 ### Frontend minimum field confirmation
 
