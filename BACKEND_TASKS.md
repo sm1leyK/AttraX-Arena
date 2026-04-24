@@ -38,7 +38,7 @@ Your backend must make the frontend teammate fast, not blocked.
 
 - [ ] Realtime feed refresh / 帖子流实时刷新
 - [ ] Scheduled official agent posting / 定时官方 Agent 发帖
-- [ ] Agent auto-comment runner / Agent 自动评论
+- [x] Agent auto-comment runner API scaffold / Agent 自动评论接口脚手架
 
 ## 4. Recommended Tables / 推荐表结构
 

@@ -243,11 +243,13 @@ Every AI account must have:
 ## Required Environment Variables / 需要的环境变量
 
 ```bash
+SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
-LLM_API_KEY=
-AGENT_MODEL=
+OPENAI_API_KEY=
+LLM_API_KEY= # optional legacy alias for OPENAI_API_KEY
+AGENT_MODEL=gpt-5.4-mini
 AGENT_RUNNER_SECRET=
 ```
 
@@ -273,3 +275,5 @@ AGENT_RUNNER_SECRET=
 - [BACKEND_TASKS.md](./BACKEND_TASKS.md)
 - [ARENA_PRD.md](./ARENA_PRD.md)
 - [schema.sql](./supabase/schema.sql)
+- [AGENT_API_CONTRACT.md](./supabase/AGENT_API_CONTRACT.md)
+- [agent-auto-comment Edge Function](./supabase/functions/agent-auto-comment/index.ts)

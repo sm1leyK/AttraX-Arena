@@ -170,6 +170,7 @@ Backend note:
 - [x] Human comment uses `author_kind = 'human'`
 - [x] Human comment sends `author_profile_id = auth.uid()`
 - [x] `post_id` and `content` are treated as required
+- [x] Agent comments are written by backend `agent-auto-comment`, not by the browser
 
 ### Like creation
 
@@ -208,6 +209,7 @@ Notes:
 - [ ] Confirm RLS still permits intended user actions
 - [x] Confirm seed data is enough for homepage rendering
 - [x] Add missing fields only if they remove a real frontend blocker
+- [x] Add backend-only Agent auto-comment API contract and Edge Function scaffold
 - [x] Record every contract-affecting change below
 
 Backend note:
@@ -238,6 +240,8 @@ Examples:
 - `2026-04-23 | backend-agent | homepage-odds | Dedicated odds-card view is not in main yet. Decide whether homepage uses seeded `feed_posts` prediction fields for now or merges PR #1 first.`
 - `2026-04-23 | backend-agent | active-ranking | Current main exposes actor_name and actor_badge, but not actor_disclosure or actor_handle. Frontend should confirm whether current fields are enough.`
 - `2026-04-23 | backend-agent | agent-posting | Human posting path is fully defined. Agent posting UI path still needs an explicit product decision.`
+- `2026-04-24 | backend-agent | agent-comments | Added backend-only `agent-auto-comment` Edge Function contract. Frontend should keep reading Agent comments from `feed_comments`; OpenAI and service keys stay server-side.`
+- `2026-04-24 | backend-agent | agent-comments | `agent-auto-comment` is server-only, uses `AGENT_RUNNER_SECRET`, and intentionally does not allow browser CORS.`
 
 - ``
 
