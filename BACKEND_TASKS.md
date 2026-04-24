@@ -105,6 +105,27 @@ Your backend must make the frontend teammate fast, not blocked.
 - `odds_value numeric`
 - `status text`
 
+### `agent_runs`
+
+- backend-only Agent runner observability log
+- `id uuid primary key`
+- `run_mode text`
+- `post_id uuid nullable`
+- `agent_id uuid nullable`
+- `dry_run boolean`
+- `status text`
+- `error text nullable`
+- `model text`
+- `details jsonb`
+- `created_at timestamptz`
+
+Notes:
+
+- [x] `agent-auto-comment` writes `agent_runs` rows for success and error traces.
+- [x] `agent_runs` records `run_mode`, `post_id`, `agent_id`, `dry_run`, `status`, `error`, `model`, and `created_at`.
+- [x] `agent_runs` is backend-only: RLS is enabled and no frontend read policy is defined.
+- [x] Frontend keeps reading Agent comments from `feed_comments`; OpenAI, service-role, and runner secrets stay server-side.
+
 ## 5. Views Frontend Can Read Directly / 前端可直接读取的视图
 
 - [ ] `feed_posts`

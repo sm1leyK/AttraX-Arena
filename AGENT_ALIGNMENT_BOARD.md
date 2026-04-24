@@ -65,6 +65,12 @@ If this board conflicts with those files, humans should update the source-of-tru
 - `comments`
 - `likes`
 
+### Backend-only operator tables
+
+- `agent_runs`
+
+Frontend code should not read `agent_runs`; Agent run observability stays behind the backend/service-role boundary.
+
 ### Upload rule
 
 - bucket: `arena-assets`
@@ -212,6 +218,7 @@ Notes:
 - [x] Add missing fields only if they remove a real frontend blocker
 - [x] Add backend-only Agent auto-comment API contract and Edge Function scaffold
 - [x] Add autonomous Agent community comment pass for human/Agent thread interaction
+- [x] Add backend-only Agent run observability for `agent-auto-comment`
 - [x] Record every contract-affecting change below
 
 Backend note:
@@ -245,13 +252,13 @@ Examples:
 - `2026-04-24 | backend-agent | agent-comments | Added backend-only `agent-auto-comment` Edge Function contract. Frontend should keep reading Agent comments from `feed_comments`; OpenAI and service keys stay server-side.`
 - `2026-04-24 | backend-agent | agent-comments | `agent-auto-comment` is server-only, uses `AGENT_RUNNER_SECRET`, and intentionally does not allow browser CORS.`
 - `2026-04-24 | backend-agent | agent-comments | `agent-auto-comment` now supports autonomous runs when `post_id` is omitted; it scores feed posts and lets official Agents interact with human or Agent participants.`
-
-- ``
+- `2026-04-24 | backend-agent | agent-observability | Added backend-only `agent_runs` logging for `agent-auto-comment` success/error traces. Frontend should continue using `feed_comments` only.`
 
 ## 11. Change Log
 
 - `2026-04-23 | codex | created initial agent-to-agent alignment board`
 - `2026-04-23 | codex | filled backend-confirmed checklist items and added current backend constraints`
+- `2026-04-24 | codex | added Agent run observability contract for backend runner debugging`
 
 ## 12. Done Standard
 

@@ -78,6 +78,15 @@ type GeneratedComment = {
   inserted_comment_id: string | null;
 };
 
+type AgentRunStatus = "success" | "error";
+
+type AgentRunContext = {
+  config: RuntimeConfig | null;
+  payload: AgentAutoCommentPayload | null;
+  agentPool: AgentRow[];
+  result: JsonRecord | null;
+};
+
 type CandidatePost = {
   post: FeedPostRow;
   recentComments: FeedCommentRow[];
@@ -122,6 +131,13 @@ Deno.serve(async (request: Request) => {
     }, 403);
   }
 
+  const runContext: AgentRunContext = {
+    config: null,
+    payload: null,
+    agentPool: [],
+    result: null,
+  };
+
   try {
     if (request.method !== "POST") {
       throw new HttpError(405, "method_not_allowed", "Use POST for agent auto comments.");
@@ -129,32 +145,46 @@ Deno.serve(async (request: Request) => {
 
     const agentRunnerSecret = readRequiredEnv("AGENT_RUNNER_SECRET");
     authorizeRunner(request, agentRunnerSecret);
+    runContext.config = readLoggingConfig(agentRunnerSecret);
+
     const config = readRuntimeConfig(agentRunnerSecret);
+    runContext.config = config;
 
     const payload = parsePayload(await readJsonBody(request));
+    runContext.payload = payload;
+
     const agentPool = await loadRequestedAgents(config, payload);
-    const result = payload.postId
+    runContext.agentPool = agentPool;
+    runContext.result = payload.postId
       ? await runForSpecificPost(config, payload, agentPool)
       : await runAutonomousCommunityPass(config, payload, agentPool);
 
-    return jsonResponse(result, payload.dryRun ? 200 : 201);
+    const runId = await recordAgentRun(runContext, "success");
+
+    return jsonResponse(withRunId(runContext.result, runId), payload.dryRun ? 200 : 201);
   } catch (error) {
     if (error instanceof HttpError) {
-      return jsonResponse({
+      const responseBody: JsonRecord = {
         ok: false,
         error: error.code,
         message: error.message,
         detail: error.detail,
-      }, error.status);
+      };
+      const runId = await recordAgentRun(runContext, "error", error);
+
+      return jsonResponse(withRunId(responseBody, runId), error.status);
     }
 
     console.error("agent-auto-comment unexpected error", error);
 
-    return jsonResponse({
+    const responseBody: JsonRecord = {
       ok: false,
       error: "internal_error",
       message: "Agent auto-comment failed unexpectedly.",
-    }, 500);
+    };
+    const runId = await recordAgentRun(runContext, "error", error);
+
+    return jsonResponse(withRunId(responseBody, runId), 500);
   }
 });
 
@@ -179,6 +209,23 @@ function readRuntimeConfig(agentRunnerSecret: string): RuntimeConfig {
     supabaseUrl: supabaseUrl!,
     supabaseServiceRoleKey: supabaseServiceRoleKey!,
     openaiApiKey: openaiApiKey!,
+    agentRunnerSecret,
+    agentModel: readEnv("AGENT_MODEL") ?? DEFAULT_AGENT_MODEL,
+  };
+}
+
+function readLoggingConfig(agentRunnerSecret: string): RuntimeConfig | null {
+  const supabaseUrl = readEnv("SUPABASE_URL") ?? readEnv("NEXT_PUBLIC_SUPABASE_URL");
+  const supabaseServiceRoleKey = readEnv("SUPABASE_SERVICE_ROLE_KEY");
+
+  if (!supabaseUrl || !supabaseServiceRoleKey) {
+    return null;
+  }
+
+  return {
+    supabaseUrl,
+    supabaseServiceRoleKey,
+    openaiApiKey: readEnv("OPENAI_API_KEY") ?? readEnv("LLM_API_KEY") ?? "",
     agentRunnerSecret,
     agentModel: readEnv("AGENT_MODEL") ?? DEFAULT_AGENT_MODEL,
   };
@@ -262,6 +309,230 @@ function parsePayload(input: unknown): AgentAutoCommentPayload {
     maxPosts,
     dryRun: input.dry_run === true,
     allowRepeat: input.allow_repeat === true,
+  };
+}
+
+async function recordAgentRun(
+  context: AgentRunContext,
+  status: AgentRunStatus,
+  error?: unknown,
+): Promise<string | null> {
+  if (!context.config) {
+    return null;
+  }
+
+  try {
+    const rows = await supabasePost<{ id: string }>(context.config, "agent_runs", buildAgentRunLog(context, status, error));
+    return rows[0]?.id ?? null;
+  } catch (logError) {
+    console.error("agent-auto-comment run log failed", logError);
+    return null;
+  }
+}
+
+function buildAgentRunLog(
+  context: AgentRunContext,
+  status: AgentRunStatus,
+  error?: unknown,
+): JsonRecord {
+  const comments = readGeneratedCommentSummaries(context.result);
+  const postsConsidered = readPostsConsideredSummaries(context.result);
+  const errorSummary = error ? summarizeError(error) : null;
+  const details: JsonRecord = {
+    request: buildRequestSummary(context.payload),
+    comment_count: comments.length,
+    comments,
+  };
+  const errorDetails = buildErrorDetails(error);
+
+  if (postsConsidered.length > 0) {
+    details.posts_considered = postsConsidered;
+  }
+
+  if (errorDetails) {
+    details.error = errorDetails;
+  }
+
+  return {
+    run_mode: inferAgentRunMode(context.payload, context.result),
+    post_id: inferAgentRunPostId(context.payload, comments),
+    agent_id: inferAgentRunAgentId(context.payload, context.agentPool, comments),
+    dry_run: context.payload?.dryRun ?? false,
+    status,
+    error: status === "error" ? errorSummary ?? "unknown_error" : null,
+    model: context.config!.agentModel,
+    details,
+  };
+}
+
+function buildRequestSummary(payload: AgentAutoCommentPayload | null): JsonRecord | null {
+  if (!payload) {
+    return null;
+  }
+
+  return {
+    post_id: payload.postId ?? null,
+    agent_id: payload.agentId ?? null,
+    agent_handle: payload.agentHandle ?? null,
+    mode: payload.mode,
+    max_comments: payload.maxComments,
+    max_posts: payload.maxPosts,
+    dry_run: payload.dryRun,
+    allow_repeat: payload.allowRepeat,
+  };
+}
+
+function inferAgentRunMode(
+  payload: AgentAutoCommentPayload | null,
+  result: JsonRecord | null,
+): "post" | "autonomous" | "unknown" {
+  const resultRunMode = result ? readStringField(result, "run_mode") : null;
+
+  if (resultRunMode === "post" || resultRunMode === "autonomous") {
+    return resultRunMode;
+  }
+
+  if (!payload) {
+    return "unknown";
+  }
+
+  return payload.postId ? "post" : "autonomous";
+}
+
+function inferAgentRunPostId(
+  payload: AgentAutoCommentPayload | null,
+  comments: JsonRecord[],
+): string | null {
+  if (payload?.postId) {
+    return payload.postId;
+  }
+
+  const postIds = uniqueStrings(comments.map((comment) => readStringField(comment, "post_id")));
+  return postIds.length === 1 ? postIds[0] : null;
+}
+
+function inferAgentRunAgentId(
+  payload: AgentAutoCommentPayload | null,
+  agentPool: AgentRow[],
+  comments: JsonRecord[],
+): string | null {
+  if (payload?.agentId) {
+    return payload.agentId;
+  }
+
+  if (payload?.agentHandle && agentPool.length === 1) {
+    return agentPool[0].id;
+  }
+
+  const agentIds = uniqueStrings(comments.map((comment) => readStringField(comment, "agent_id")));
+  return agentIds.length === 1 ? agentIds[0] : null;
+}
+
+function readGeneratedCommentSummaries(result: JsonRecord | null): JsonRecord[] {
+  if (!result || !Array.isArray(result.comments)) {
+    return [];
+  }
+
+  return result.comments
+    .filter(isRecord)
+    .map((comment) => ({
+      post_id: readStringField(comment, "post_id"),
+      post_title: truncate(readStringField(comment, "post_title") ?? "", 160),
+      agent_id: readStringField(comment, "agent_id"),
+      agent_handle: readStringField(comment, "agent_handle"),
+      inserted_comment_id: readStringField(comment, "inserted_comment_id"),
+      content_length: typeof comment.content === "string" ? comment.content.length : null,
+    }));
+}
+
+function readPostsConsideredSummaries(result: JsonRecord | null): JsonRecord[] {
+  if (!result || !Array.isArray(result.posts_considered)) {
+    return [];
+  }
+
+  return result.posts_considered
+    .filter(isRecord)
+    .map((post) => ({
+      post_id: readStringField(post, "post_id"),
+      title: truncate(readStringField(post, "title") ?? "", 160),
+      author_kind: readStringField(post, "author_kind"),
+      score: readNumberField(post, "score"),
+      recent_human_comments: readNumberField(post, "recent_human_comments"),
+      recent_agent_comments: readNumberField(post, "recent_agent_comments"),
+      generated_comments: readNumberField(post, "generated_comments"),
+    }));
+}
+
+function buildErrorDetails(error: unknown): JsonRecord | null {
+  if (!error) {
+    return null;
+  }
+
+  if (error instanceof HttpError) {
+    const detail = buildSafeHttpErrorDetail(error);
+    const summary: JsonRecord = {
+      code: error.code,
+      status: error.status,
+      message: error.message,
+    };
+
+    if (detail) {
+      summary.detail = detail;
+    }
+
+    return summary;
+  }
+
+  if (error instanceof Error) {
+    return {
+      name: error.name,
+      message: error.message,
+    };
+  }
+
+  return {
+    message: String(error),
+  };
+}
+
+function buildSafeHttpErrorDetail(error: HttpError): JsonRecord | null {
+  if (error.code === "missing_environment" && Array.isArray(error.detail)) {
+    return {
+      missing: error.detail.filter((value) => typeof value === "string"),
+    };
+  }
+
+  if (error.code === "no_autonomous_targets" && isRecord(error.detail)) {
+    return {
+      posts_considered: readPostsConsideredSummaries({
+        posts_considered: Array.isArray(error.detail.posts_considered) ? error.detail.posts_considered : [],
+      }),
+    };
+  }
+
+  return null;
+}
+
+function summarizeError(error: unknown): string {
+  if (error instanceof HttpError) {
+    return `${error.code}: ${error.message}`;
+  }
+
+  if (error instanceof Error) {
+    return error.message || error.name;
+  }
+
+  return String(error);
+}
+
+function withRunId(body: JsonRecord | null, runId: string | null): JsonRecord {
+  if (!runId) {
+    return body ?? {};
+  }
+
+  return {
+    ...(body ?? {}),
+    run_id: runId,
   };
 }
 
@@ -889,6 +1160,16 @@ function readOptionalNumber(input: JsonRecord, key: string): number | undefined 
   return value;
 }
 
+function readStringField(input: JsonRecord, key: string): string | null {
+  const value = input[key];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function readNumberField(input: JsonRecord, key: string): number | null {
+  const value = input[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
 function clampInt(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, Math.trunc(value)));
 }
@@ -904,6 +1185,10 @@ function rotateByStableHash<T>(items: T[], seed: string): T[] {
 
   const offset = stableHash(seed) % items.length;
   return [...items.slice(offset), ...items.slice(0, offset)];
+}
+
+function uniqueStrings(values: Array<string | null>): string[] {
+  return [...new Set(values.filter(Boolean) as string[])];
 }
 
 function stableHash(value: string): number {
