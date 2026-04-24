@@ -4426,7 +4426,6 @@ function renderDetailOdds() {
         </div>
       </div>
     `).join("")}
-    <div class="odds-write-hint">这里是帖子本身的 YES / NO 站队市场，不是预测卡片。前端会优先尝试真实后端写入接口；如果后端帖子投注端点还没上线，会明确提示。</div>
     ${renderDetailMarketPosition({ post, marketType, marketDeadline })}
     <div class="inline-status" id="detailOddsStatus">${escapeHtml(sideStatusText)}</div>
   `;
