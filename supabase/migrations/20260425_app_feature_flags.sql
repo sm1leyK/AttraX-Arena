@@ -16,6 +16,7 @@ values
   ('activity', false, '活动', 'Temporarily disabled while the activity center is de-emphasized.')
 on conflict (feature_key) do update
 set
+  enabled = excluded.enabled,
   label = excluded.label,
   description = excluded.description;
 

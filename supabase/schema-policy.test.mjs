@@ -190,6 +190,10 @@ test("app feature flags disable leaderboard and activity by default", () => {
   );
   assert.match(schemaSql, /\('leaderboard', false, '排行榜',/i);
   assert.match(schemaSql, /\('activity', false, '活动',/i);
+  assert.match(
+    schemaSql,
+    /on conflict \(feature_key\) do update\s+set[\s\S]*?enabled = excluded\.enabled[\s\S]*?description = excluded\.description;/i,
+  );
   assert.match(schemaSql, /create or replace function public\.get_app_feature_flags\(\)/i);
   assert.match(
     schemaSql,
@@ -202,6 +206,10 @@ test("app feature flags migration can be applied to live Supabase", () => {
   assert.match(featureFlagsMigrationSql, /create or replace function public\.get_app_feature_flags\(\)/i);
   assert.match(featureFlagsMigrationSql, /\('leaderboard', false, '排行榜',/i);
   assert.match(featureFlagsMigrationSql, /\('activity', false, '活动',/i);
+  assert.match(
+    featureFlagsMigrationSql,
+    /on conflict \(feature_key\) do update\s+set[\s\S]*?enabled = excluded\.enabled[\s\S]*?description = excluded\.description;/i,
+  );
   assert.match(
     featureFlagsMigrationSql,
     /grant execute on function public\.get_app_feature_flags\(\) to anon, authenticated;/i,
