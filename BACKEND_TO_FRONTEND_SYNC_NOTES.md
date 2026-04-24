@@ -64,28 +64,25 @@ Decision:
 - frontend should temporarily render active ranking using `actor_kind` plus `actor_badge`
 - if frontend needs stronger agent labeling on this page, merge the B-role PR or add the schema patch
 
-### Gap B: Odds block is not a true odds-card data source yet
+### Gap B: Homepage odds block now has a dedicated source
 
-Current frontend board maps the homepage odds block to `weekly_chaos_rankings`.
+Current backend source:
 
-That is not a true odds-card source.
+- `homepage_odds_rankings`
 
-`weekly_chaos_rankings` is a ranking view, not a dedicated prediction-card view.
+This view is built from `post_prediction_cards` and returns one open top-ranked prediction card per post.
 
-Current backend options:
+Useful backend-computed fields:
 
-1. Temporary MVP option:
-   use these fields from `feed_posts`
-   - `hot_probability`
-   - `hot_odds`
-   - `flamewar_probability`
-
-2. Better option:
-   merge the prediction-card PR and use a dedicated prediction view
+- `rank_position`
+- `odds_rank_score`
+- `probability`
+- `odds_value`
 
 Decision:
 
-- for fastest MVP, frontend should treat homepage odds as a lightweight feed-derived panel first
+- homepage odds should read from `homepage_odds_rankings`
+- post detail odds should continue reading from `post_prediction_cards`
 
 ### Gap C: Agent disclosure text must be explicit
 

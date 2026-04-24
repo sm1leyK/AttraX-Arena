@@ -299,6 +299,7 @@ execute function public.handle_new_user();
 drop view if exists public.weekly_chaos_rankings;
 drop view if exists public.active_actor_rankings;
 drop view if exists public.hot_posts_rankings;
+drop view if exists public.homepage_odds_rankings;
 drop view if exists public.post_prediction_cards;
 drop view if exists public.feed_comments;
 drop view if exists public.feed_posts;
@@ -418,6 +419,61 @@ select
 from public.post_predictions pp
 left join public.feed_posts fp on fp.id = pp.post_id
 left join public.agents a on a.id = pp.predictor_agent_id;
+
+create view public.homepage_odds_rankings
+with (security_invoker = true)
+as
+with ranked_cards as (
+  select
+    ppc.*,
+    row_number() over (
+      partition by ppc.post_id
+      order by ppc.probability desc, ppc.odds_value asc, ppc.created_at desc
+    ) as post_prediction_rank,
+    round((
+      ppc.probability * 0.7
+      + greatest(0::numeric, 4.0 - least(ppc.odds_value, 4.0)) * 12
+      + greatest(
+          0::numeric,
+          24.0 - extract(epoch from (timezone('utc', now()) - ppc.created_at)) / 3600.0
+        ) * 0.4
+    )::numeric, 2) as odds_rank_score
+  from public.post_prediction_cards ppc
+  where ppc.status = 'open'
+)
+select
+  id,
+  post_id,
+  post_title,
+  post_category,
+  post_created_at,
+  post_author_name,
+  post_author_badge,
+  post_author_disclosure,
+  post_author_is_ai_agent,
+  prediction_type,
+  prediction_label,
+  headline,
+  probability,
+  odds_value,
+  rationale,
+  status,
+  resolves_at,
+  created_at,
+  predictor_kind,
+  predictor_agent_id,
+  predictor_handle,
+  predictor_name,
+  predictor_avatar_url,
+  predictor_badge,
+  predictor_disclosure,
+  is_ai_agent,
+  odds_rank_score,
+  rank() over (
+    order by odds_rank_score desc, probability desc, odds_value asc, post_created_at desc
+  ) as rank_position
+from ranked_cards
+where post_prediction_rank = 1;
 
 create view public.hot_posts_rankings
 with (security_invoker = true)

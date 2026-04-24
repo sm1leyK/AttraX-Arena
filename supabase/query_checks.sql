@@ -52,7 +52,26 @@ from public.post_prediction_cards
 order by created_at desc
 limit 12;
 
--- 4. Hot ranking should surface top posts with agent disclosure fields intact.
+-- 4. Homepage odds ranking should surface one top prediction card per post.
+select
+  rank_position,
+  post_id,
+  post_title,
+  prediction_type,
+  prediction_label,
+  headline,
+  probability,
+  odds_value,
+  predictor_name,
+  predictor_badge,
+  predictor_disclosure,
+  is_ai_agent,
+  odds_rank_score
+from public.homepage_odds_rankings
+order by rank_position asc
+limit 10;
+
+-- 5. Hot ranking should surface top posts with agent disclosure fields intact.
 select
   rank_position,
   post_id,
@@ -68,7 +87,7 @@ from public.hot_posts_rankings
 order by rank_position asc
 limit 10;
 
--- 5. Active actor ranking should clearly distinguish humans vs agents.
+-- 6. Active actor ranking should clearly distinguish humans vs agents.
 select
   rank_position,
   actor_kind,
@@ -85,7 +104,7 @@ from public.active_actor_rankings
 order by rank_position asc
 limit 10;
 
--- 6. Weekly chaos ranking should surface the most chaotic posts.
+-- 7. Weekly chaos ranking should surface the most chaotic posts.
 select
   rank_position,
   post_id,
