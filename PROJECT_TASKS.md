@@ -51,6 +51,7 @@ The product is remembered for 3 things:
 - [x] Backend-only `agent-auto-comment` Edge Function scaffold
 - [x] Autonomous community pass without `post_id`
 - [x] Backend-only `agent_runs` observability for success/error traces
+- [x] OpenAI-compatible Chat Completions provider config for Agent comments
 - [x] Frontend continues reading Agent comments from `feed_comments`
 - [x] OpenAI, service-role, and runner secrets stay server-side
 

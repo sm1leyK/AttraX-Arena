@@ -1,11 +1,15 @@
 type JsonRecord = Record<string, unknown>;
 
+type AgentLlmApi = "responses" | "chat_completions";
+
 type RuntimeConfig = {
   supabaseUrl: string;
   supabaseServiceRoleKey: string;
   openaiApiKey: string;
   agentRunnerSecret: string;
   agentModel: string;
+  agentLlmBaseUrl: string;
+  agentLlmApi: AgentLlmApi;
 };
 
 type AgentAutoCommentPayload = {
@@ -95,7 +99,8 @@ type CandidatePost = {
   recentAgentCommentCount: number;
 };
 
-const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
+const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1";
+const DEFAULT_AGENT_LLM_API: AgentLlmApi = "responses";
 const DEFAULT_AGENT_MODEL = "gpt-5.4-mini";
 const MAX_AGENT_COMMENTS_PER_RUN = 3;
 const MAX_COMMENT_CHARS = 600;
@@ -192,6 +197,8 @@ function readRuntimeConfig(agentRunnerSecret: string): RuntimeConfig {
   const supabaseUrl = readEnv("SUPABASE_URL") ?? readEnv("NEXT_PUBLIC_SUPABASE_URL");
   const supabaseServiceRoleKey = readEnv("SUPABASE_SERVICE_ROLE_KEY");
   const openaiApiKey = readEnv("OPENAI_API_KEY") ?? readEnv("LLM_API_KEY");
+  const agentLlmBaseUrl = readAgentLlmBaseUrl();
+  const agentLlmApi = readAgentLlmApi();
 
   const missing = [
     ["SUPABASE_URL", supabaseUrl],
@@ -211,6 +218,8 @@ function readRuntimeConfig(agentRunnerSecret: string): RuntimeConfig {
     openaiApiKey: openaiApiKey!,
     agentRunnerSecret,
     agentModel: readEnv("AGENT_MODEL") ?? DEFAULT_AGENT_MODEL,
+    agentLlmBaseUrl,
+    agentLlmApi,
   };
 }
 
@@ -222,13 +231,46 @@ function readLoggingConfig(agentRunnerSecret: string): RuntimeConfig | null {
     return null;
   }
 
+  let agentLlmBaseUrl = DEFAULT_OPENAI_BASE_URL;
+  let agentLlmApi = DEFAULT_AGENT_LLM_API;
+
+  try {
+    agentLlmBaseUrl = readAgentLlmBaseUrl();
+    agentLlmApi = readAgentLlmApi();
+  } catch {
+    // Keep logging available for invalid LLM env failures.
+  }
+
   return {
     supabaseUrl,
     supabaseServiceRoleKey,
     openaiApiKey: readEnv("OPENAI_API_KEY") ?? readEnv("LLM_API_KEY") ?? "",
     agentRunnerSecret,
     agentModel: readEnv("AGENT_MODEL") ?? DEFAULT_AGENT_MODEL,
+    agentLlmBaseUrl,
+    agentLlmApi,
   };
+}
+
+function readAgentLlmBaseUrl(): string {
+  const rawUrl = readEnv("AGENT_LLM_BASE_URL") ?? readEnv("OPENAI_BASE_URL") ?? DEFAULT_OPENAI_BASE_URL;
+
+  try {
+    const url = new URL(rawUrl);
+    return url.toString().replace(/\/+$/, "");
+  } catch {
+    throw new HttpError(500, "invalid_environment", "AGENT_LLM_BASE_URL or OPENAI_BASE_URL must be a valid URL.");
+  }
+}
+
+function readAgentLlmApi(): AgentLlmApi {
+  const value = readEnv("AGENT_LLM_API") ?? DEFAULT_AGENT_LLM_API;
+
+  if (value === "responses" || value === "chat_completions") {
+    return value;
+  }
+
+  throw new HttpError(500, "invalid_environment", "AGENT_LLM_API must be responses or chat_completions.");
 }
 
 function readRequiredEnv(name: string): string {
@@ -340,6 +382,10 @@ function buildAgentRunLog(
   const errorSummary = error ? summarizeError(error) : null;
   const details: JsonRecord = {
     request: buildRequestSummary(context.payload),
+    llm: {
+      api: context.config?.agentLlmApi,
+      base_url: context.config?.agentLlmBaseUrl,
+    },
     comment_count: comments.length,
     comments,
   };
@@ -876,7 +922,20 @@ async function generateAgentComment(
   post: FeedPostRow,
   recentComments: FeedCommentRow[],
 ): Promise<string> {
-  const response = await fetch(OPENAI_RESPONSES_URL, {
+  if (config.agentLlmApi === "chat_completions") {
+    return generateChatCompletionComment(config, agent, post, recentComments);
+  }
+
+  return generateResponsesComment(config, agent, post, recentComments);
+}
+
+async function generateResponsesComment(
+  config: RuntimeConfig,
+  agent: AgentRow,
+  post: FeedPostRow,
+  recentComments: FeedCommentRow[],
+): Promise<string> {
+  const response = await fetch(buildAgentLlmUrl(config), {
     method: "POST",
     headers: {
       Authorization: `Bearer ${config.openaiApiKey}`,
@@ -901,16 +960,64 @@ async function generateAgentComment(
   const data = await readResponseJson(response);
 
   if (!response.ok) {
-    throw new HttpError(response.status, "openai_request_failed", "OpenAI comment generation failed.", data);
+    throw new HttpError(response.status, "llm_request_failed", "LLM comment generation failed.", data);
   }
 
   const text = extractOutputText(data);
 
   if (!text) {
-    throw new HttpError(502, "empty_openai_output", "OpenAI returned no comment text.", data);
+    throw new HttpError(502, "empty_llm_output", "LLM returned no comment text.", data);
   }
 
   return text;
+}
+
+async function generateChatCompletionComment(
+  config: RuntimeConfig,
+  agent: AgentRow,
+  post: FeedPostRow,
+  recentComments: FeedCommentRow[],
+): Promise<string> {
+  const response = await fetch(buildAgentLlmUrl(config), {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${config.openaiApiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: config.agentModel,
+      max_tokens: 220,
+      messages: [
+        {
+          role: "system",
+          content: buildDeveloperPrompt(agent),
+        },
+        {
+          role: "user",
+          content: buildUserPrompt(post, recentComments),
+        },
+      ],
+    }),
+  });
+
+  const data = await readResponseJson(response);
+
+  if (!response.ok) {
+    throw new HttpError(response.status, "llm_request_failed", "LLM comment generation failed.", data);
+  }
+
+  const text = extractChatCompletionText(data);
+
+  if (!text) {
+    throw new HttpError(502, "empty_llm_output", "LLM returned no comment text.", data);
+  }
+
+  return text;
+}
+
+function buildAgentLlmUrl(config: RuntimeConfig): string {
+  const endpoint = config.agentLlmApi === "chat_completions" ? "chat/completions" : "responses";
+  return `${config.agentLlmBaseUrl}/${endpoint}`;
 }
 
 async function insertAgentComment(
@@ -1107,6 +1214,39 @@ function extractOutputText(data: unknown): string {
     for (const content of item.content) {
       if (isRecord(content) && typeof content.text === "string") {
         chunks.push(content.text);
+      }
+    }
+  }
+
+  return chunks.join("\n").trim();
+}
+
+function extractChatCompletionText(data: unknown): string {
+  if (!isRecord(data) || !Array.isArray(data.choices)) {
+    return "";
+  }
+
+  const chunks: string[] = [];
+
+  for (const choice of data.choices) {
+    if (!isRecord(choice) || !isRecord(choice.message)) {
+      continue;
+    }
+
+    const content = choice.message.content;
+
+    if (typeof content === "string") {
+      chunks.push(content);
+      continue;
+    }
+
+    if (!Array.isArray(content)) {
+      continue;
+    }
+
+    for (const part of content) {
+      if (isRecord(part) && typeof part.text === "string") {
+        chunks.push(part.text);
       }
     }
   }
