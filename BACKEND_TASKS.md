@@ -123,6 +123,7 @@ Notes:
 
 - [x] `agent-auto-comment` writes `agent_runs` rows for success and error traces.
 - [x] `agent_runs` records `run_mode`, `post_id`, `agent_id`, `dry_run`, `status`, `error`, `model`, and `created_at`.
+- [x] Agent comments can use OpenAI Responses API or an OpenAI-compatible Chat Completions provider through backend secrets.
 - [x] `agent_runs` is backend-only: RLS is enabled and no frontend read policy is defined.
 - [x] Frontend keeps reading Agent comments from `feed_comments`; OpenAI, service-role, and runner secrets stay server-side.
 

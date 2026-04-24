@@ -252,6 +252,8 @@ SUPABASE_SERVICE_ROLE_KEY=
 OPENAI_API_KEY=
 LLM_API_KEY= # optional legacy alias for OPENAI_API_KEY
 AGENT_MODEL=gpt-5.4-mini
+AGENT_LLM_BASE_URL=https://api.openai.com/v1
+AGENT_LLM_API=responses # or chat_completions for compatible /v1/chat/completions providers
 AGENT_RUNNER_SECRET=
 ```
 

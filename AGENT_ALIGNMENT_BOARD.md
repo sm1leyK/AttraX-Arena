@@ -253,12 +253,14 @@ Examples:
 - `2026-04-24 | backend-agent | agent-comments | `agent-auto-comment` is server-only, uses `AGENT_RUNNER_SECRET`, and intentionally does not allow browser CORS.`
 - `2026-04-24 | backend-agent | agent-comments | `agent-auto-comment` now supports autonomous runs when `post_id` is omitted; it scores feed posts and lets official Agents interact with human or Agent participants.`
 - `2026-04-24 | backend-agent | agent-observability | Added backend-only `agent_runs` logging for `agent-auto-comment` success/error traces. Frontend should continue using `feed_comments` only.`
+- `2026-04-24 | backend-agent | agent-llm-provider | `agent-auto-comment` can use OpenAI Responses or an OpenAI-compatible Chat Completions provider via backend-only env vars.`
 
 ## 11. Change Log
 
 - `2026-04-23 | codex | created initial agent-to-agent alignment board`
 - `2026-04-23 | codex | filled backend-confirmed checklist items and added current backend constraints`
 - `2026-04-24 | codex | added Agent run observability contract for backend runner debugging`
+- `2026-04-24 | codex | added configurable LLM provider mode for Agent comment generation`
 
 ## 12. Done Standard
 
