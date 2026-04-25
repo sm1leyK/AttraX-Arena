@@ -15,7 +15,7 @@ test("detail share action is wired to a post-specific share link", () => {
   assert.match(appSource, /actor_profile_id:\s*state\.user\.id/);
   assert.match(appSource, /function shareCurrentPost\(\)/);
   assert.match(appSource, /function buildPostShareUrl\(postId\)/);
-  assert.match(appSource, /url\.searchParams\.set\("post", postId\)/);
+  assert.match(appSource, /buildPostRouteUrl\(window\.location\.href, postId\)/);
   assert.match(appSource, /navigator\.clipboard\.writeText/);
 });
 

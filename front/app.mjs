@@ -5,6 +5,12 @@ import {
   SUPABASE_URL,
 } from "./supabase-config.mjs";
 import {
+  buildPageHash,
+  buildPostHash,
+  buildPostRouteUrl,
+  readInitialRoute,
+} from "./hash-router.mjs";
+import {
   DEFAULT_FEATURE_FLAGS,
   getDisabledNavPages,
   normalizeFeatureFlags,
@@ -142,6 +148,7 @@ const state = {
   currentDetailPost: null,
   currentLikeId: null,
   initialSharedPostId: null,
+  initialRoutePage: "home",
   feedMode: "latest",
   leaderboardTab: "Hot Posts",
   leaderboardTime: "今日",
@@ -499,20 +506,9 @@ const leaderboardMotion = createLeaderboardMotion({
 });
 const configReady = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY && /^https?:\/\//.test(SUPABASE_URL));
 const BOOKMARK_STORAGE_KEY = "attrax_bookmarked_posts_v1";
-function getInitialSharedPostId() {
-  try {
-    const url = new URL(window.location.href);
-    return url.searchParams.get("post") || "";
-  } catch (_error) {
-    return "";
-  }
-}
 
 function buildPostShareUrl(postId) {
-  const url = new URL(window.location.href);
-  url.searchParams.set("post", postId);
-  url.hash = "";
-  return url.toString();
+  return buildPostRouteUrl(window.location.href, postId);
 }
 
 const ensureMotionLayer = () => {
@@ -578,12 +574,15 @@ function init() {
   initCursorGlow();
   initOuteRain();
   initProjectSubmissionCountdown();
-  state.initialSharedPostId = getInitialSharedPostId();
+  const initialRoute = readInitialRoute(window.location.href);
+  state.initialRoutePage = initialRoute.page;
+  state.initialSharedPostId = initialRoute.postId;
   if (state.initialSharedPostId) {
     state.detailPostId = state.initialSharedPostId;
   }
   state.bookmarkedPostIds = loadBookmarkedPostIds();
   initGlobals();
+  initBrowserRouting();
   initStaticInteractions();
   applyFeatureGates();
   initCookieConsent();
@@ -641,9 +640,18 @@ async function bootstrapData() {
     await loadDetailData(state.detailPostId);
   }
 
-  if (state.initialSharedPostId && state.currentDetailPost) {
-    navigate("detail");
+  if (state.initialRoutePage === "detail" && state.currentDetailPost) {
+    navigate("detail", { updateRoute: false });
+    syncBrowserRouteForPost(state.currentDetailPost.id, { replace: true });
+    return;
   }
+
+  if (state.initialRoutePage !== "home") {
+    applyBrowserRoute({ page: state.initialRoutePage, postId: "" });
+    return;
+  }
+
+  syncBrowserRouteForPage("home", { replace: true });
 }
 
 async function handleAuthChange() {
@@ -984,6 +992,8 @@ function applyFeatureGates() {
   document.querySelectorAll(".nav-link[data-page]").forEach((link) => {
     const page = link.dataset.page;
     const disabled = state.disabledNavPages.has(page);
+
+    link.setAttribute("href", buildPageHash(page));
 
     link.classList.toggle("nav-link-disabled", disabled);
     if (disabled) {
@@ -2678,7 +2688,57 @@ function formatProjectSubmissionDeadlineLabel(label) {
   return "4月25日 24:00";
 }
 
-function navigate(page) {
+function initBrowserRouting() {
+  window.addEventListener("popstate", handleBrowserRouteChange);
+  window.addEventListener("hashchange", handleBrowserRouteChange);
+}
+
+function handleBrowserRouteChange() {
+  applyBrowserRoute(readInitialRoute(window.location.href));
+}
+
+function applyBrowserRoute(route = readInitialRoute(window.location.href)) {
+  if (route.page === "detail" && route.postId) {
+    openDetailById(route.postId, { updateRoute: false });
+    return;
+  }
+
+  if (!navigate(route.page, { updateRoute: false })) {
+    navigate("home", { replaceRoute: true });
+  }
+}
+
+function syncBrowserRoute(hash, { replace = false } = {}) {
+  if (!hash || window.location.hash === hash) {
+    return;
+  }
+
+  const url = new URL(window.location.href);
+  url.searchParams.delete("post");
+  url.hash = hash;
+
+  if (replace) {
+    window.history.replaceState({ routeHash: hash }, "", url);
+    return;
+  }
+
+  window.history.pushState({ routeHash: hash }, "", url);
+}
+
+function syncBrowserRouteForPage(page, { replace = false } = {}) {
+  syncBrowserRoute(buildPageHash(page), { replace });
+}
+
+function syncBrowserRouteForPost(postId, { replace = false } = {}) {
+  syncBrowserRoute(buildPostHash(postId), { replace });
+}
+
+function navigate(page, options = {}) {
+  const {
+    updateRoute = true,
+    replaceRoute = false,
+    scroll = true,
+  } = options;
   hideSearchDropdown();
 
   if (state.disabledNavPages.has(page)) {
@@ -2698,8 +2758,15 @@ function navigate(page) {
     document.body.scrollTop = 0;
   };
 
-  resetScroll();
-  requestAnimationFrame(resetScroll);
+  if (updateRoute) {
+    syncBrowserRouteForPage(page, { replace: replaceRoute });
+  }
+
+  if (scroll) {
+    resetScroll();
+    requestAnimationFrame(resetScroll);
+  }
+
   return true;
 }
 
@@ -3925,7 +3992,9 @@ async function submitPost() {
   await loadHomepageData();
   if (data?.id) {
     await loadDetailData(data.id);
-    navigate("detail");
+    if (navigate("detail", { updateRoute: false })) {
+      syncBrowserRouteForPost(data.id);
+    }
   } else {
     navigate("home");
   }
@@ -4300,9 +4369,28 @@ function renderProfileWallet() {
   }
 }
 
-function openDetailById(postId) {
-  navigate("detail");
+function openDetailById(postId, options = {}) {
+  if (!postId) {
+    return false;
+  }
+
+  const {
+    updateRoute = true,
+    replaceRoute = false,
+  } = options;
+
+  state.detailPostId = postId;
+
+  if (!navigate("detail", { updateRoute: false })) {
+    return false;
+  }
+
+  if (updateRoute) {
+    syncBrowserRouteForPost(postId, { replace: replaceRoute });
+  }
+
   void loadDetailData(postId);
+  return true;
 }
 
 function renderDetailOdds() {
