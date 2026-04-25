@@ -12,9 +12,34 @@ const corsHeaders = {
 };
 
 const ANALYZE_POST_MODE = Deno.env.get("ANALYZE_POST_MODE") ?? "mock";
-const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY") ?? "";
-const OPENAI_LENS_MODEL = Deno.env.get("OPENAI_LENS_MODEL") ?? "gpt-5.4-mini";
-const OPENAI_BASE_URL = Deno.env.get("OPENAI_BASE_URL") ?? "https://api.openai.com/v1";
+
+/* ── Multi-provider resolution (mirrors agent-auto-comment) ── */
+const ACTIVE_PROVIDER = (Deno.env.get("ACTIVE_LLM_PROVIDER") ?? "openai").toLowerCase();
+
+function resolveLensConfig(): { apiKey: string; baseUrl: string; model: string } {
+  switch (ACTIVE_PROVIDER) {
+    case "orbitai":
+      return {
+        apiKey: Deno.env.get("ORBITAI_API_KEY") ?? Deno.env.get("OPENAI_API_KEY") ?? "",
+        baseUrl: Deno.env.get("ORBITAI_BASE_URL") ?? "https://aiapi.orbitai.global/v1",
+        model: Deno.env.get("OPENAI_LENS_MODEL") ?? "gpt-4o-mini",
+      };
+    case "deepseek":
+      return {
+        apiKey: Deno.env.get("DEEPSEEK_API_KEY") ?? Deno.env.get("OPENAI_API_KEY") ?? "",
+        baseUrl: Deno.env.get("DEEPSEEK_BASE_URL") ?? "https://api.deepseek.com/v1",
+        model: Deno.env.get("OPENAI_LENS_MODEL") ?? "deepseek-chat",
+      };
+    default:
+      return {
+        apiKey: Deno.env.get("OPENAI_API_KEY") ?? "",
+        baseUrl: Deno.env.get("OPENAI_BASE_URL") ?? "https://api.openai.com/v1",
+        model: Deno.env.get("OPENAI_LENS_MODEL") ?? "gpt-5.4-mini",
+      };
+  }
+}
+
+const LENS = resolveLensConfig();
 
 function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), { status, headers: corsHeaders });
@@ -46,20 +71,20 @@ Deno.serve(async (request) => {
   }
 
   if (ANALYZE_POST_MODE === "openai") {
-    if (!OPENAI_API_KEY) {
-      return fail(500, "missing_openai_key", "OPENAI_API_KEY is not configured in Supabase secrets.");
+    if (!LENS.apiKey) {
+      return fail(500, "missing_openai_key", `API key for provider "${ACTIVE_PROVIDER}" is not configured.`);
     }
 
     try {
       return json(await analyzePostWithOpenAI({
-        apiKey: OPENAI_API_KEY,
-        model: OPENAI_LENS_MODEL,
-        baseUrl: OPENAI_BASE_URL,
+        apiKey: LENS.apiKey,
+        model: LENS.model,
+        baseUrl: LENS.baseUrl,
         post: normalized.post,
         supportBoardSignal: normalized.supportBoardSignal,
       }));
     } catch (error) {
-      const message = error instanceof Error ? error.message : "OpenAI analysis failed.";
+      const message = error instanceof Error ? error.message : "LLM analysis failed.";
       return fail(502, "openai_request_failed", message);
     }
   }

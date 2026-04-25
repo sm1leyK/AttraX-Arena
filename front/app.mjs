@@ -131,6 +131,7 @@ const state = {
   supportBoardDataSource: "unknown",
   supportBoardRainSignature: null,
   detailComments: [],
+  agentHandles: [],
   detailPredictions: [],
   detailUserBets: [],
   detailSupportBoardItem: null,
@@ -882,12 +883,13 @@ async function ensureWalletExperience({ reason, allowDailyReward }) {
 }
 
 async function loadHomepageData({ render = true } = {}) {
-  const [postsResult, hotResult, nonSupportHotResult, activeResult, predictionResult] = await Promise.all([
+  const [postsResult, hotResult, nonSupportHotResult, activeResult, predictionResult, agentsResult] = await Promise.all([
     state.supabase.from("feed_posts").select("*").order("created_at", { ascending: false }),
     state.supabase.from("hot_posts_rankings").select("*").order("rank_position", { ascending: true }).limit(8),
     state.supabase.from("non_support_hot_posts_rankings").select("*").order("rank_position", { ascending: true }).limit(8),
     state.supabase.from("active_actor_rankings").select("*").order("rank_position", { ascending: true }).limit(8),
     state.supabase.from("homepage_odds_rankings").select("*").order("rank_position", { ascending: true }).limit(8),
+    state.supabase.from("agents").select("id,handle,display_name,kind,is_active").eq("is_active", true),
   ]);
 
   if (!postsResult.error) {
@@ -944,6 +946,10 @@ async function loadHomepageData({ render = true } = {}) {
 
   if (state.predictionCards.length < SUPPORT_BOARD_DEFAULTS.limit) {
     state.predictionCards = mergePredictionCards(state.predictionCards, MOCK_PREDICTION_CARDS);
+  }
+
+  if (!agentsResult.error && agentsResult.data) {
+    state.agentHandles = agentsResult.data;
   }
 
   await loadUserPostMarketBets();
@@ -1977,6 +1983,124 @@ function initStaticInteractions() {
 
   els.commentSubmit?.addEventListener("click", () => {
     void submitComment();
+  });
+
+  /* ── @mention autocomplete ── */
+  const mentionDropdown = document.getElementById("mention-autocomplete");
+  let mentionActiveIndex = -1;
+
+  function getMentionQuery(text, cursorPos) {
+    const before = text.slice(0, cursorPos);
+    const match = before.match(/@([a-z0-9-]*)$/i);
+    return match ? { query: match[1].toLowerCase(), start: match.index, full: match[0] } : null;
+  }
+
+  function renderMentionDropdown(agents) {
+    if (!mentionDropdown) return;
+    if (agents.length === 0) {
+      mentionDropdown.classList.remove("visible");
+      return;
+    }
+    mentionDropdown.innerHTML = agents.map((agent, i) =>
+      `<div class="mention-item${i === mentionActiveIndex ? " active" : ""}" data-handle="${escapeHtml(agent.handle)}" data-index="${i}">
+        @${escapeHtml(agent.handle)}
+        <span class="mention-badge">AI Agent</span>
+        <span style="color:var(--text-secondary)">${escapeHtml(agent.display_name)}</span>
+      </div>`
+    ).join("");
+    mentionDropdown.classList.add("visible");
+  }
+
+  function handleMentionInput(event) {
+    if (!els.commentInput || !mentionDropdown) return;
+    const text = els.commentInput.value;
+    const cursorPos = els.commentInput.selectionStart;
+    const mention = getMentionQuery(text, cursorPos);
+
+    if (!mention) {
+      mentionDropdown.classList.remove("visible");
+      mentionActiveIndex = -1;
+      return;
+    }
+
+    const filtered = state.agentHandles.filter(
+      (a) => a.handle.toLowerCase().includes(mention.query) || a.display_name.toLowerCase().includes(mention.query)
+    ).slice(0, 5);
+
+    mentionActiveIndex = -1;
+    renderMentionDropdown(filtered);
+
+    mentionDropdown.querySelectorAll(".mention-item").forEach((item) => {
+      item.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        insertMention(item.dataset.handle, mention);
+      });
+    });
+  }
+
+  function insertMention(handle, mention) {
+    if (!els.commentInput) return;
+    const text = els.commentInput.value;
+    const before = text.slice(0, mention.start) + `@${handle} `;
+    const after = text.slice(els.commentInput.selectionStart);
+    els.commentInput.value = before + after;
+    els.commentInput.focus();
+    const newPos = before.length;
+    els.commentInput.setSelectionRange(newPos, newPos);
+    mentionDropdown.classList.remove("visible");
+    mentionActiveIndex = -1;
+  }
+
+  function handleMentionKeydown(event) {
+    if (!mentionDropdown || !mentionDropdown.classList.contains("visible")) return;
+    const items = mentionDropdown.querySelectorAll(".mention-item");
+    if (items.length === 0) return;
+
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      mentionActiveIndex = (mentionActiveIndex + 1) % items.length;
+      renderMentionDropdown(state.agentHandles.filter(
+        (a) => {
+          const text = els.commentInput.value;
+          const cursorPos = els.commentInput.selectionStart;
+          const mention = getMentionQuery(text, cursorPos);
+          if (!mention) return false;
+          return a.handle.toLowerCase().includes(mention.query) || a.display_name.toLowerCase().includes(mention.query);
+        }
+      ).slice(0, 5));
+      items[mentionActiveIndex]?.scrollIntoView({ block: "nearest" });
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      mentionActiveIndex = mentionActiveIndex <= 0 ? items.length - 1 : mentionActiveIndex - 1;
+      renderMentionDropdown(state.agentHandles.filter(
+        (a) => {
+          const text = els.commentInput.value;
+          const cursorPos = els.commentInput.selectionStart;
+          const mention = getMentionQuery(text, cursorPos);
+          if (!mention) return false;
+          return a.handle.toLowerCase().includes(mention.query) || a.display_name.toLowerCase().includes(mention.query);
+        }
+      ).slice(0, 5));
+      items[mentionActiveIndex]?.scrollIntoView({ block: "nearest" });
+    } else if (event.key === "Enter" && mentionActiveIndex >= 0) {
+      event.preventDefault();
+      const handle = items[mentionActiveIndex]?.dataset.handle;
+      if (handle) {
+        const text = els.commentInput.value;
+        const cursorPos = els.commentInput.selectionStart;
+        const mention = getMentionQuery(text, cursorPos);
+        if (mention) insertMention(handle, mention);
+      }
+    } else if (event.key === "Escape") {
+      mentionDropdown.classList.remove("visible");
+      mentionActiveIndex = -1;
+    }
+  }
+
+  els.commentInput?.addEventListener("input", handleMentionInput);
+  els.commentInput?.addEventListener("keydown", handleMentionKeydown);
+  els.commentInput?.addEventListener("blur", () => {
+    setTimeout(() => mentionDropdown?.classList.remove("visible"), 150);
   });
 
   els.publishButton?.addEventListener("click", () => {
@@ -3596,7 +3720,7 @@ function renderDetailComments() {
             ${comment.is_ai_agent ? `<span class="comment-badge">${escapeHtml(comment.author_badge || "AI Agent")}</span>` : ""}
             <span class="comment-time">${formatRelativeTime(comment.created_at)}</span>
           </div>
-          <div class="comment-text">${escapeHtml(comment.content)}</div>
+          <div class="comment-text">${highlightMentions(escapeHtml(comment.content))}</div>
           ${comment.is_ai_agent && comment.author_disclosure ? `<span class="comment-disclosure">${escapeHtml(comment.author_disclosure)}</span>` : ""}
         </div>
       </div>
@@ -5294,6 +5418,10 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+function highlightMentions(html) {
+  return html.replace(/@([a-z0-9][a-z0-9-]{2,23})/gi, '<span class="mention-highlight">@$1</span>');
 }
 
 function escapeRegExp(value) {

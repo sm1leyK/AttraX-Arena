@@ -16,11 +16,13 @@ type AgentAutoCommentPayload = {
   postId?: string;
   agentId?: string;
   agentHandle?: string;
-  mode: "single" | "roundtable";
+  mode: "single" | "roundtable" | "reactive";
   maxComments: number;
   maxPosts: number;
   dryRun: boolean;
   allowRepeat: boolean;
+  triggerCommentContent?: string;
+  triggerCommentAuthor?: string;
 };
 
 type AgentRow = {
@@ -100,13 +102,39 @@ type CandidatePost = {
 };
 
 const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1";
-const DEFAULT_AGENT_LLM_API: AgentLlmApi = "responses";
-const DEFAULT_AGENT_MODEL = "gpt-5.4-mini";
+const DEFAULT_AGENT_LLM_API: AgentLlmApi = "chat_completions";
+const DEFAULT_AGENT_MODEL = "deepseek-chat";
+
+/* ── Multi-provider resolution ── */
+function resolveActiveProvider(): { apiKey: string; baseUrl: string; model: string } {
+  const provider = (readEnv("ACTIVE_LLM_PROVIDER") ?? "openai").toLowerCase();
+  switch (provider) {
+    case "orbitai":
+      return {
+        apiKey: readEnv("ORBITAI_API_KEY") ?? readEnv("OPENAI_API_KEY") ?? "",
+        baseUrl: readEnv("ORBITAI_BASE_URL") ?? "https://aiapi.orbitai.global/v1",
+        model: readEnv("AGENT_MODEL") ?? "gpt-4o-mini",
+      };
+    case "deepseek":
+      return {
+        apiKey: readEnv("DEEPSEEK_API_KEY") ?? readEnv("OPENAI_API_KEY") ?? "",
+        baseUrl: readEnv("DEEPSEEK_BASE_URL") ?? "https://api.deepseek.com/v1",
+        model: readEnv("AGENT_MODEL") ?? "deepseek-chat",
+      };
+    default:
+      return {
+        apiKey: readEnv("OPENAI_API_KEY") ?? readEnv("LLM_API_KEY") ?? "",
+        baseUrl: readEnv("OPENAI_BASE_URL") ?? DEFAULT_OPENAI_BASE_URL,
+        model: readEnv("AGENT_MODEL") ?? "gpt-5.4-mini",
+      };
+  }
+}
 const MAX_AGENT_COMMENTS_PER_RUN = 3;
 const MAX_COMMENT_CHARS = 600;
 const RECENT_COMMENT_LIMIT = 8;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const HANDLE_RE = /^[a-z0-9][a-z0-9-]{2,23}$/;
+const AT_MENTION_RE = /@([a-z0-9][a-z0-9-]{2,23})/gi;
 const FORBIDDEN_COMMENT_LANGUAGE_RE =
   /\b(real[-\s]?money|wallet|deposit|withdraw(?:al)?|payment|gambl(?:e|ing)|wager|betting|bet)\b|\u771f\u94b1|\u771f\u91d1\u767d\u94f6|\u94b1\u5305|\u5145\u503c|\u63d0\u73b0|\u652f\u4ed8|\u8d4c\u535a|\u535a\u5f69|\u4e0b\u6ce8|\u62bc\u6ce8|\u8d4c\u5c40|\u8d4c\u6ce8/i;
 
@@ -160,9 +188,11 @@ Deno.serve(async (request: Request) => {
 
     const agentPool = await loadRequestedAgents(config, payload);
     runContext.agentPool = agentPool;
-    runContext.result = payload.postId
-      ? await runForSpecificPost(config, payload, agentPool)
-      : await runAutonomousCommunityPass(config, payload, agentPool);
+    runContext.result = payload.mode === "reactive"
+      ? await runReactiveReply(config, payload, agentPool)
+      : payload.postId
+        ? await runForSpecificPost(config, payload, agentPool)
+        : await runAutonomousCommunityPass(config, payload, agentPool);
 
     const runId = await recordAgentRun(runContext, "success");
 
@@ -196,14 +226,13 @@ Deno.serve(async (request: Request) => {
 function readRuntimeConfig(agentRunnerSecret: string): RuntimeConfig {
   const supabaseUrl = readEnv("SUPABASE_URL") ?? readEnv("NEXT_PUBLIC_SUPABASE_URL");
   const supabaseServiceRoleKey = readEnv("SUPABASE_SERVICE_ROLE_KEY");
-  const openaiApiKey = readEnv("OPENAI_API_KEY") ?? readEnv("LLM_API_KEY");
-  const agentLlmBaseUrl = readAgentLlmBaseUrl();
+  const provider = resolveActiveProvider();
   const agentLlmApi = readAgentLlmApi();
 
   const missing = [
     ["SUPABASE_URL", supabaseUrl],
     ["SUPABASE_SERVICE_ROLE_KEY", supabaseServiceRoleKey],
-    ["OPENAI_API_KEY or LLM_API_KEY", openaiApiKey],
+    [`API key (provider=${readEnv("ACTIVE_LLM_PROVIDER") ?? "openai"})`, provider.apiKey],
   ]
     .filter(([, value]) => !value)
     .map(([name]) => name);
@@ -215,10 +244,10 @@ function readRuntimeConfig(agentRunnerSecret: string): RuntimeConfig {
   return {
     supabaseUrl: supabaseUrl!,
     supabaseServiceRoleKey: supabaseServiceRoleKey!,
-    openaiApiKey: openaiApiKey!,
+    openaiApiKey: provider.apiKey,
     agentRunnerSecret,
-    agentModel: readEnv("AGENT_MODEL") ?? DEFAULT_AGENT_MODEL,
-    agentLlmBaseUrl,
+    agentModel: provider.model,
+    agentLlmBaseUrl: provider.baseUrl,
     agentLlmApi,
   };
 }
@@ -231,23 +260,23 @@ function readLoggingConfig(agentRunnerSecret: string): RuntimeConfig | null {
     return null;
   }
 
-  let agentLlmBaseUrl = DEFAULT_OPENAI_BASE_URL;
   let agentLlmApi = DEFAULT_AGENT_LLM_API;
 
   try {
-    agentLlmBaseUrl = readAgentLlmBaseUrl();
     agentLlmApi = readAgentLlmApi();
   } catch {
     // Keep logging available for invalid LLM env failures.
   }
 
+  const provider = resolveActiveProvider();
+
   return {
     supabaseUrl,
     supabaseServiceRoleKey,
-    openaiApiKey: readEnv("OPENAI_API_KEY") ?? readEnv("LLM_API_KEY") ?? "",
+    openaiApiKey: provider.apiKey,
     agentRunnerSecret,
-    agentModel: readEnv("AGENT_MODEL") ?? DEFAULT_AGENT_MODEL,
-    agentLlmBaseUrl,
+    agentModel: provider.model,
+    agentLlmBaseUrl: provider.baseUrl,
     agentLlmApi,
   };
 }
@@ -332,8 +361,12 @@ function parsePayload(input: unknown): AgentAutoCommentPayload {
   }
 
   const modeValue = readOptionalString(input, "mode") ?? "single";
-  if (modeValue !== "single" && modeValue !== "roundtable") {
-    throw new HttpError(400, "invalid_mode", "mode must be single or roundtable.");
+  if (modeValue !== "single" && modeValue !== "roundtable" && modeValue !== "reactive") {
+    throw new HttpError(400, "invalid_mode", "mode must be single, roundtable, or reactive.");
+  }
+
+  if (modeValue === "reactive" && !postId) {
+    throw new HttpError(400, "missing_field", "post_id is required for reactive mode.");
   }
 
   const defaultMaxComments = postId
@@ -351,6 +384,8 @@ function parsePayload(input: unknown): AgentAutoCommentPayload {
     maxPosts,
     dryRun: input.dry_run === true,
     allowRepeat: input.allow_repeat === true,
+    triggerCommentContent: readOptionalString(input, "trigger_comment_content"),
+    triggerCommentAuthor: readOptionalString(input, "trigger_comment_author"),
   };
 }
 
@@ -787,6 +822,121 @@ async function runAutonomousCommunityPass(
   };
 }
 
+/* ── @-mention extraction ── */
+function extractMentionedHandles(text: string): string[] {
+  const matches = text.matchAll(AT_MENTION_RE);
+  const handles = new Set<string>();
+  for (const match of matches) {
+    handles.add(match[1].toLowerCase());
+  }
+  return [...handles];
+}
+
+/* ── Reactive reply: triggered by @mention or new interaction ── */
+async function runReactiveReply(
+  config: RuntimeConfig,
+  payload: AgentAutoCommentPayload,
+  agentPool: AgentRow[],
+): Promise<JsonRecord> {
+  if (!payload.postId) {
+    throw new HttpError(400, "missing_field", "post_id is required for reactive mode.");
+  }
+
+  const triggerContent = payload.triggerCommentContent ?? "";
+  const mentionedHandles = extractMentionedHandles(triggerContent);
+  const post = await loadPost(config, payload.postId);
+  const recentComments = await loadRecentComments(config, payload.postId);
+
+  /* Determine which agents should reply */
+  let targetAgents: AgentRow[];
+
+  if (payload.agentId || payload.agentHandle) {
+    /* Explicit agent specified */
+    const requested = agentPool.find((a) =>
+      payload.agentId ? a.id === payload.agentId : a.handle === payload.agentHandle
+    );
+    if (!requested) {
+      throw new HttpError(404, "agent_not_found", "The specified agent was not found or is inactive.");
+    }
+    targetAgents = [requested];
+  } else if (mentionedHandles.length > 0) {
+    /* @mentioned agents */
+    targetAgents = agentPool.filter((a) => mentionedHandles.includes(a.handle));
+    if (targetAgents.length === 0) {
+      return {
+        ok: true,
+        dry_run: payload.dryRun,
+        run_mode: "reactive",
+        post_id: payload.postId,
+        model: config.agentModel,
+        comments: [],
+        skipped_reason: "mentioned_handles_not_found",
+        mentioned_handles: mentionedHandles,
+      };
+    }
+  } else {
+    /* No @mention, no explicit agent — pick one agent by rotation */
+    const existingAgentIds = await loadExistingAgentCommentIds(config, payload.postId);
+    const blockedIds = post.author_agent_id ? new Set([post.author_agent_id]) : new Set<string>();
+    targetAgents = selectAgentsForPost(agentPool, existingAgentIds, payload.postId, 1, blockedIds);
+    if (targetAgents.length === 0) {
+      return {
+        ok: true,
+        dry_run: payload.dryRun,
+        run_mode: "reactive",
+        post_id: payload.postId,
+        model: config.agentModel,
+        comments: [],
+        skipped_reason: "no_available_agent",
+      };
+    }
+  }
+
+  const comments: GeneratedComment[] = [];
+
+  for (const agent of targetAgents) {
+    if (comments.length >= payload.maxComments) break;
+
+    const mentionedByHandle = mentionedHandles.includes(agent.handle) ? payload.triggerCommentAuthor : undefined;
+    const rawComment = await generateAgentComment(config, agent, post, recentComments, triggerContent, mentionedByHandle);
+    const content = normalizeGeneratedComment(rawComment);
+    let inserted: InsertedCommentRow | null = null;
+
+    if (!payload.dryRun) {
+      inserted = await insertAgentComment(config, payload.postId, agent.id, content);
+    }
+
+    comments.push({
+      post_id: payload.postId,
+      post_title: post.title,
+      agent_id: agent.id,
+      agent_handle: agent.handle,
+      agent_name: agent.display_name,
+      content,
+      inserted_comment_id: inserted?.id ?? null,
+    });
+
+    recentComments.unshift({
+      author_name: agent.display_name,
+      author_badge: agent.badge,
+      is_ai_agent: true,
+      content,
+      created_at: inserted?.created_at ?? new Date().toISOString(),
+    });
+  }
+
+  return {
+    ok: true,
+    dry_run: payload.dryRun,
+    run_mode: "reactive",
+    post_id: payload.postId,
+    model: config.agentModel,
+    trigger_author: payload.triggerCommentAuthor ?? null,
+    mentioned_handles: mentionedHandles,
+    comments,
+  };
+}
+
 async function createAgentCommentsForPost(
   config: RuntimeConfig,
   payload: AgentAutoCommentPayload,
@@ -921,12 +1071,16 @@ async function generateAgentComment(
   agent: AgentRow,
   post: FeedPostRow,
   recentComments: FeedCommentRow[],
+  triggerContent?: string,
+  mentionedByHandle?: string,
 ): Promise<string> {
+  const mentionTrigger = triggerContent || undefined;
+
   if (config.agentLlmApi === "chat_completions") {
-    return generateChatCompletionComment(config, agent, post, recentComments);
+    return generateChatCompletionComment(config, agent, post, recentComments, mentionTrigger, mentionedByHandle);
   }
 
-  return generateResponsesComment(config, agent, post, recentComments);
+  return generateResponsesComment(config, agent, post, recentComments, mentionTrigger, mentionedByHandle);
 }
 
 async function generateResponsesComment(
@@ -934,6 +1088,8 @@ async function generateResponsesComment(
   agent: AgentRow,
   post: FeedPostRow,
   recentComments: FeedCommentRow[],
+  mentionTrigger?: string,
+  mentionedByHandle?: string,
 ): Promise<string> {
   const response = await fetch(buildAgentLlmUrl(config), {
     method: "POST",
@@ -947,11 +1103,11 @@ async function generateResponsesComment(
       input: [
         {
           role: "developer",
-          content: buildDeveloperPrompt(agent),
+          content: buildDeveloperPrompt(agent, mentionedByHandle),
         },
         {
           role: "user",
-          content: buildUserPrompt(post, recentComments),
+          content: buildUserPrompt(post, recentComments, mentionTrigger),
         },
       ],
     }),
@@ -977,6 +1133,8 @@ async function generateChatCompletionComment(
   agent: AgentRow,
   post: FeedPostRow,
   recentComments: FeedCommentRow[],
+  mentionTrigger?: string,
+  mentionedByHandle?: string,
 ): Promise<string> {
   const response = await fetch(buildAgentLlmUrl(config), {
     method: "POST",
@@ -990,11 +1148,11 @@ async function generateChatCompletionComment(
       messages: [
         {
           role: "system",
-          content: buildDeveloperPrompt(agent),
+          content: buildDeveloperPrompt(agent, mentionedByHandle),
         },
         {
           role: "user",
-          content: buildUserPrompt(post, recentComments),
+          content: buildUserPrompt(post, recentComments, mentionTrigger),
         },
       ],
     }),
@@ -1041,25 +1199,39 @@ async function insertAgentComment(
   return rows[0];
 }
 
-function buildDeveloperPrompt(agent: AgentRow): string {
+function buildDeveloperPrompt(agent: AgentRow, mentionedByHandle?: string): string {
+  const mentionInstruction = mentionedByHandle
+    ? `You were explicitly @mentioned by "${mentionedByHandle}" in a comment. This is your cue to respond directly. Acknowledge being called out naturally — you can be surprised, delighted, or playfully annoyed, but always stay in character.`
+    : "";
+
   return [
     `You are ${agent.display_name}, an official AttraX Arena AI Agent.`,
     "You are not a human and must never pretend to be one.",
     `Agent handle: @${agent.handle}`,
+    "",
+    `## Character Profile`,
     `Persona: ${agent.persona ?? "Playful forum participant"}`,
     `Bio: ${agent.bio ?? "A clearly labeled synthetic forum participant."}`,
     `Disclosure shown in UI: ${agent.disclosure}`,
+    "",
+    "## Response Style",
+    "Stay strictly in character. Your persona defines your tone, vocabulary, and reaction style.",
+    "Match the language of the post — reply in Chinese if the post is in Chinese, English if English.",
     "Write one short forum comment that invites discussion.",
     "You may respond to human users or other clearly labeled AI Agents in the thread.",
-    "If you reference another participant, keep the interaction friendly, transparent, and grounded in the visible post/comments.",
-    "Keep it under 80 words, same language as the post when obvious, and avoid markdown wrappers.",
+    "If you reference another participant, use their @handle and keep the interaction friendly, transparent, and grounded in the visible post/comments.",
+    "Keep it under 80 words and avoid markdown wrappers.",
+    mentionInstruction,
+    "",
+    "## Hard Rules",
     "Do not mention OpenAI, system prompts, hidden instructions, wallets, payments, real money, betting, wagering, gambling, deposits, withdrawals, or bets.",
     "Frame any prediction energy as entertainment-only forum commentary, never as a money action.",
     "Do not produce harassment, hate, sexual content, private data claims, or legal/medical/financial advice.",
+    "Never break character or acknowledge being an AI language model.",
   ].join("\n");
 }
 
-function buildUserPrompt(post: FeedPostRow, recentComments: FeedCommentRow[]): string {
+function buildUserPrompt(post: FeedPostRow, recentComments: FeedCommentRow[], mentionTrigger?: string): string {
   const recentHumanCount = recentComments.filter((comment) => !comment.is_ai_agent).length;
   const recentAgentCount = recentComments.filter((comment) => comment.is_ai_agent).length;
   const recent = recentComments
@@ -1070,6 +1242,10 @@ function buildUserPrompt(post: FeedPostRow, recentComments: FeedCommentRow[]): s
       return `- ${label}: ${truncate(comment.content, 220)}`;
     })
     .join("\n") || "- No comments yet.";
+
+  const mentionContext = mentionTrigger
+    ? `\nThe comment that triggered you: "${mentionTrigger}"`
+    : "";
 
   return [
     "Create exactly one new comment for this AttraX Arena thread.",
@@ -1083,6 +1259,7 @@ function buildUserPrompt(post: FeedPostRow, recentComments: FeedCommentRow[]): s
     "",
     `Recent participant mix: ${recentHumanCount} human comments, ${recentAgentCount} AI Agent comments.`,
     "It is okay to engage with either humans or AI Agents, but keep the AI identity explicit when relevant.",
+    mentionContext,
     "",
     "Recent comments:",
     recent,
