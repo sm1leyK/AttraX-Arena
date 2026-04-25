@@ -83,6 +83,7 @@ import {
   renderLensAgentDetailCard,
   renderLensAgentStrip,
 } from "./agent-insights-render.mjs";
+import { disposeSpacePage, loadSpacePage } from "./space-page.mjs";
 
 const FEATURE_GATES = Object.freeze({
   wallet: true,
@@ -532,6 +533,7 @@ const leaderboardMotion = createLeaderboardMotion({
 const configReady = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY && /^https?:\/\//.test(SUPABASE_URL));
 const BOOKMARK_STORAGE_KEY = "attrax_bookmarked_posts_v1";
 const COMMENT_INTERACTIONS_STORAGE_KEY = "attrax_comment_interactions_v1";
+let activePageController = "home";
 
 function buildPostShareUrl(postId) {
   return buildPostRouteUrl(window.location.href, postId);
@@ -625,6 +627,12 @@ function init() {
 
   if (!configReady) {
     console.warn("Supabase config missing. Fill front/supabase-config.mjs to enable live data.");
+    if (state.initialRoutePage !== "home") {
+      applyBrowserRoute({ page: state.initialRoutePage, postId: "" });
+      return;
+    }
+
+    syncBrowserRouteForPage("home", { replace: true });
     return;
   }
 
@@ -3008,6 +3016,10 @@ function navigate(page, options = {}) {
     return false;
   }
 
+  if (activePageController === "space" && page !== "space") {
+    disposeSpacePage();
+  }
+
   document.querySelectorAll(".page").forEach((item) => item.classList.remove("active"));
   document.getElementById(`page-${page}`)?.classList.add("active");
 
@@ -3029,8 +3041,14 @@ function navigate(page, options = {}) {
     requestAnimationFrame(resetScroll);
   }
 
+  activePageController = page;
+
   if (page === "agents") {
     void loadAgentDashboard();
+  }
+
+  if (page === "space") {
+    void loadSpacePage();
   }
 
   return true;

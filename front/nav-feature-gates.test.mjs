@@ -8,7 +8,7 @@ const currentDir = dirname(fileURLToPath(import.meta.url));
 const html = readFileSync(join(currentDir, "index.html"), "utf8");
 const appSource = readFileSync(join(currentDir, "app.mjs"), "utf8");
 
-for (const page of ["leaderboard", "activity"]) {
+for (const page of ["leaderboard", "activity", "space"]) {
   test(`exposes the ${page} top navigation entry`, () => {
     const navLink = html.match(new RegExp(`<a[^>]+data-page="${page}"[^>]*>`))?.[0] ?? "";
 

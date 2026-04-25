@@ -614,6 +614,294 @@
             to { opacity: 1; transform: translateY(0); }
         }
 
+        /* ===== SPACE PAGE ===== */
+        .space-page {
+            min-height: calc(100vh - 78px);
+            position: relative;
+            overflow: hidden;
+            background:
+                linear-gradient(135deg, rgba(123,164,219,0.08) 0 18%, transparent 18% 100%),
+                linear-gradient(225deg, rgba(255,159,67,0.06) 0 16%, transparent 16% 100%),
+                linear-gradient(180deg, rgba(8,9,12,0.98) 0%, rgba(12,13,17,0.98) 100%);
+        }
+
+        .space-stage {
+            position: relative;
+            min-height: calc(100vh - 78px);
+        }
+
+        .space-canvas {
+            position: absolute;
+            inset: 0;
+        }
+
+        .space-canvas canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        .space-panel,
+        .space-detail-card,
+        .space-status {
+            backdrop-filter: blur(18px) saturate(130%);
+            -webkit-backdrop-filter: blur(18px) saturate(130%);
+            box-shadow: var(--shadow);
+        }
+
+        .space-panel {
+            position: absolute;
+            top: 28px;
+            left: 28px;
+            z-index: 2;
+            width: min(420px, calc(100vw - 56px));
+            background: rgba(255,255,255,0.055);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 24px;
+            padding: 20px 22px;
+        }
+
+        .space-kicker {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 11px;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            color: rgba(255,255,255,0.62);
+            margin-bottom: 10px;
+        }
+
+        .space-title {
+            font-family: var(--font-pixel);
+            font-size: 26px;
+            line-height: 1.15;
+            margin-bottom: 10px;
+            text-shadow: 1px 0 0 rgba(255,255,255,0.18);
+        }
+
+        .space-copy {
+            color: rgba(255,255,255,0.72);
+            font-size: 14px;
+            line-height: 1.65;
+        }
+
+        .space-hints {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 16px;
+        }
+
+        .space-hint-chip {
+            border-radius: 999px;
+            border: 1px solid rgba(255,255,255,0.1);
+            background: rgba(255,255,255,0.04);
+            color: rgba(255,255,255,0.64);
+            font-size: 12px;
+            padding: 7px 12px;
+        }
+
+        .space-detail-card {
+            position: absolute;
+            top: 28px;
+            right: 28px;
+            z-index: 2;
+            width: min(360px, calc(100vw - 56px));
+            background: rgba(255,255,255,0.06);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 24px;
+            padding: 20px 22px;
+        }
+
+        .space-detail-label {
+            font-size: 11px;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            color: rgba(255,255,255,0.54);
+            margin-bottom: 10px;
+        }
+
+        .space-detail-name {
+            font-size: 24px;
+            font-weight: 600;
+            margin-bottom: 6px;
+        }
+
+        .space-detail-role {
+            color: rgba(123,164,219,0.95);
+            font-size: 13px;
+            margin-bottom: 14px;
+        }
+
+        .space-detail-text {
+            color: rgba(255,255,255,0.72);
+            font-size: 14px;
+            line-height: 1.7;
+            margin-bottom: 18px;
+        }
+
+        .space-detail-meta {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px;
+        }
+
+        .space-detail-meta-item {
+            padding: 12px 14px;
+            border-radius: 18px;
+            border: 1px solid rgba(255,255,255,0.08);
+            background: rgba(255,255,255,0.04);
+        }
+
+        .space-detail-meta-label {
+            font-size: 11px;
+            color: rgba(255,255,255,0.5);
+            margin-bottom: 6px;
+        }
+
+        .space-detail-meta-value {
+            font-size: 13px;
+            color: rgba(255,255,255,0.86);
+            line-height: 1.5;
+        }
+
+        .space-status {
+            position: absolute;
+            left: 28px;
+            bottom: 28px;
+            z-index: 2;
+            max-width: min(420px, calc(100vw - 56px));
+            padding: 12px 16px;
+            border-radius: 16px;
+            border: 1px solid rgba(255,255,255,0.08);
+            background: rgba(10,11,15,0.72);
+            color: rgba(255,255,255,0.75);
+            font-size: 13px;
+            line-height: 1.5;
+        }
+
+        .space-selector-bar {
+            position: absolute;
+            left: 50%;
+            bottom: 24px;
+            transform: translateX(-50%);
+            z-index: 2;
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 10px;
+            width: min(900px, calc(100vw - 96px));
+            padding: 14px;
+            border-radius: 20px;
+            border: 1px solid rgba(255,255,255,0.08);
+            background: rgba(10,11,15,0.76);
+            backdrop-filter: blur(18px) saturate(130%);
+            -webkit-backdrop-filter: blur(18px) saturate(130%);
+            box-shadow: var(--shadow);
+        }
+
+        .space-selector-btn {
+            border: 1px solid rgba(255,255,255,0.08);
+            background: rgba(255,255,255,0.05);
+            color: rgba(255,255,255,0.72);
+            border-radius: 999px;
+            padding: 10px 14px;
+            font-size: 12px;
+            line-height: 1.2;
+            cursor: pointer;
+            transition: all var(--transition);
+            font-family: inherit;
+        }
+
+        .space-selector-btn:hover,
+        .space-selector-btn.is-active {
+            color: var(--text-primary);
+            border-color: rgba(255,255,255,0.16);
+            background: rgba(255,255,255,0.12);
+        }
+
+        .space-status[data-tone="error"] {
+            border-color: rgba(255,107,107,0.28);
+            color: rgba(255,186,186,0.92);
+        }
+
+        .space-status[data-tone="ready"] {
+            color: rgba(201,255,219,0.88);
+        }
+
+        @media (max-width: 1024px) {
+            .space-detail-card {
+                top: auto;
+                right: 24px;
+                bottom: 24px;
+                width: min(420px, calc(100vw - 48px));
+            }
+
+            .space-status {
+                left: 24px;
+                bottom: 24px;
+                max-width: calc(100vw - 48px);
+            }
+        }
+
+        @media (max-width: 768px) {
+            .space-page,
+            .space-stage {
+                min-height: calc(100vh - 126px);
+            }
+
+            .space-panel {
+                top: 18px;
+                left: 16px;
+                right: 16px;
+                width: auto;
+                padding: 16px 16px 14px;
+            }
+
+            .space-title {
+                font-size: 22px;
+            }
+
+            .space-copy {
+                display: none;
+            }
+
+            .space-hints {
+                margin-top: 12px;
+            }
+
+            .space-detail-card {
+                left: 16px;
+                right: 16px;
+                bottom: 16px;
+                width: auto;
+                padding: 16px;
+            }
+
+            .space-detail-meta {
+                grid-template-columns: 1fr;
+            }
+
+            .space-status {
+                left: 16px;
+                right: 16px;
+                bottom: 272px;
+                max-width: none;
+            }
+
+            .space-selector-bar {
+                left: 16px;
+                right: 16px;
+                bottom: 16px;
+                width: auto;
+                transform: none;
+                justify-content: flex-start;
+                overflow-x: auto;
+                flex-wrap: nowrap;
+            }
+        }
+
         /* ===== HOME PAGE ===== */
         .home-layout {
             display: grid;
@@ -4211,6 +4499,7 @@
             <a class="nav-link active" data-page="home" href="#/home" onclick="navigate('home')">首页</a>
             <a class="nav-link" data-page="leaderboard" href="#/leaderboard" onclick="navigate('leaderboard')">排行榜</a>
             <a class="nav-link" data-page="activity" href="#/activity" onclick="navigate('activity')">活动</a>
+            <a class="nav-link" data-page="space" href="#/space" onclick="navigate('space')">空间</a>
             <a class="nav-link" data-page="agents" href="#/agents" id="nav-agents-link" onclick="navigate('agents')">Agents</a>
     </div>
 
@@ -4280,7 +4569,7 @@
                         <button class="feed-tab" data-feed-mode="support">参与支持率排行</button>
                         <button class="feed-tab" data-feed-mode="non-support">不参与支持率排行</button>
                     </div>
-                </div>
+                </div>
                 <div class="post-card sr" onclick="navigate('detail')">
                     <div class="card-shimmer"></div>
                     <div class="post-meta">
@@ -5087,6 +5376,47 @@
         </div>
     </div>
 
+    <!-- ===== PAGE: SPACE ===== -->
+    <div class="page space-page" id="page-space">
+        <div class="space-stage">
+            <div class="space-canvas" id="spaceCanvas" aria-hidden="true"></div>
+            <div class="space-panel">
+                <div class="space-kicker">Pixel Agent Studio</div>
+                <h2 class="space-title">Agent 共创空间</h2>
+                <p class="space-copy">参考像素窗口头像重建 5 位角色工位，每个 Agent 都有独立发型、朝向、桌面道具和任务气泡。拖拽可以旋转视角，滚轮缩放，点击头像窗口或工位即可聚焦详情。</p>
+                <div class="space-hints">
+                    <span class="space-hint-chip">拖拽旋转</span>
+                    <span class="space-hint-chip">滚轮缩放</span>
+                    <span class="space-hint-chip">点击头像窗口</span>
+                </div>
+            </div>
+            <aside class="space-detail-card" id="spaceDetailCard" aria-live="polite">
+                <div class="space-detail-label">当前工位</div>
+                <div class="space-detail-name" id="spaceDetailName">加载中...</div>
+                <div class="space-detail-role" id="spaceDetailRole">正在准备空间数据</div>
+                <div class="space-detail-text" id="spaceDetailText">请稍候，3D 场景正在初始化。</div>
+                <div class="space-detail-meta">
+                    <div class="space-detail-meta-item">
+                        <div class="space-detail-meta-label">公告牌信息</div>
+                        <div class="space-detail-meta-value" id="spaceDetailBoard">--</div>
+                    </div>
+                    <div class="space-detail-meta-item">
+                        <div class="space-detail-meta-label">桌面状态</div>
+                        <div class="space-detail-meta-value" id="spaceDetailStatus">--</div>
+                    </div>
+                </div>
+            </aside>
+            <div class="space-status" id="spaceStatus" data-tone="loading">空间加载中，请稍候...</div>
+            <div class="space-selector-bar" id="spaceSelectorBar">
+                <button class="space-selector-btn is-active" type="button" data-space-target="trend-prophet">Trend Prophet</button>
+                <button class="space-selector-btn" type="button" data-space-target="signal-smith">Signal Smith</button>
+                <button class="space-selector-btn" type="button" data-space-target="prompt-director">Prompt Director</button>
+                <button class="space-selector-btn" type="button" data-space-target="motion-keeper">Motion Keeper</button>
+                <button class="space-selector-btn" type="button" data-space-target="qa-sentinel">QA Sentinel</button>
+            </div>
+        </div>
+    </div>
+
     <!-- ===== PAGE: AGENTS ===== -->
     <div class="page" id="page-agents">
         <div class="container" style="max-width:960px;margin:0 auto;padding:40px 24px;">
@@ -5566,8 +5896,9 @@
     };
 
     // == SAFE NAVIGATE ==
-    const _VALID_PAGES = ["home", "detail", "create", "leaderboard", "activity", "profile", "auth"];
+    const _VALID_PAGES = ["home", "detail", "create", "leaderboard", "activity", "profile", "auth", "agents", "space"];
     const _baseNav = navigate;
+    let _currentPage = document.querySelector('.page.active')?.id?.replace('page-', '') || 'home';
     window.navigate = function(page) {
         if (!_VALID_PAGES.includes(page)) {
             console.warn('[nav] invalid page:', page, '→ home');
@@ -5579,10 +5910,18 @@
         }
         const cur = document.querySelector('.page.active');
         if (cur && cur.id === 'page-' + page) return;
+        if (_currentPage === 'space' && page !== 'space') {
+            disposeSpaceScene();
+        }
         _baseNav(page);
+        _currentPage = page;
+        if (page === 'space') {
+            void loadSpaceScene();
+        }
         window.scrollTo(0, 0);
         document.documentElement.scrollTop = 0;
         document.body.scrollTop = 0;
+        window.location.hash = '#/' + page;
         // re-observe sr elements
         setTimeout(() => {
             window.scrollTo(0, 0);
@@ -5591,6 +5930,407 @@
             document.querySelectorAll('#page-' + page + ' .sr:not(.in)').forEach(el => srObs.observe(el));
         }, 30);
     };
+
+    async function loadSpaceScene() {
+        const { loadSpacePage } = await import('./space-page.mjs');
+        await loadSpacePage();
+        return;
+
+        const mount = document.getElementById('spaceCanvas');
+        const statusEl = document.getElementById('spaceStatus');
+        const detailEls = {
+            name: document.getElementById('spaceDetailName'),
+            role: document.getElementById('spaceDetailRole'),
+            text: document.getElementById('spaceDetailText'),
+            board: document.getElementById('spaceDetailBoard'),
+            status: document.getElementById('spaceDetailStatus')
+        };
+        if (!mount || mount.dataset.ready === '1') return;
+        mount.dataset.ready = '1';
+        if (statusEl) {
+            statusEl.textContent = '空间加载中，请稍候...';
+            statusEl.dataset.tone = 'loading';
+        }
+
+        const workstations = [
+            {
+                id: 'trend-prophet', name: 'Trend Prophet', role: '趋势预言师',
+                summary: '负责扫描社区热度、情绪波动与支持率，第一时间给出趋势判断。',
+                board: '公告牌：今日主看板是「支持率异动预警」。',
+                status: '桌面状态：三块图表同时刷新，蓝色波峰正在上扬。',
+                accent: '#7ba4db', deskColor: 0x1f2a37, outfitColor: 0x89aef0,
+                x: -10.5, z: -4.5, facing: Math.PI / 8, focus: { x: -10.5, y: 3.2, z: -4.2 }, offset: { x: 3.8, y: 4.1, z: 5.8 }, accessory: 'visor'
+            },
+            {
+                id: 'signal-smith', name: 'Signal Smith', role: '信号锻造师',
+                summary: '把实时事件、标签和工单拼成可执行信号，驱动整个空间的响应。',
+                board: '公告牌：正在整理「新话题流量分层」。',
+                status: '桌面状态：双显示器展开信号矩阵，右侧台灯常亮。',
+                accent: '#c9a0dc', deskColor: 0x261f31, outfitColor: 0xd7b0f0,
+                x: -5.2, z: -1.4, facing: Math.PI / 14, focus: { x: -5.2, y: 3.1, z: -1.5 }, offset: { x: 3.7, y: 4, z: 5.7 }, accessory: 'headphones'
+            },
+            {
+                id: 'prompt-director', name: 'Prompt Director', role: '提示词导演',
+                summary: '统一角色语气、任务上下文与工作节奏，协调 5 个角色之间的协作风格。',
+                board: '公告牌：本轮重点是「人物设定统一与信息表达」。',
+                status: '桌面状态：中央屏幕显示任务分镜，便签贴满边框。',
+                accent: '#ffb347', deskColor: 0x35271d, outfitColor: 0xffcf84,
+                x: 0.2, z: 1.2, facing: 0, focus: { x: 0.2, y: 3.15, z: 1.1 }, offset: { x: 0, y: 4.2, z: 7.1 }, accessory: 'glasses'
+            },
+            {
+                id: 'motion-keeper', name: 'Motion Keeper', role: '动效守护者',
+                summary: '负责空间中的镜头、旋转与交互动效，让整个房间保持沉浸感。',
+                board: '公告牌：正在校准「镜头聚焦与过渡节奏」。',
+                status: '桌面状态：桌下环形光带开启，屏幕显示相机曲线。',
+                accent: '#7ecf8e', deskColor: 0x1d2e24, outfitColor: 0x9ee2ab,
+                x: 5.6, z: -1.5, facing: -Math.PI / 14, focus: { x: 5.6, y: 3.1, z: -1.4 }, offset: { x: -3.7, y: 4, z: 5.7 }, accessory: 'cap'
+            },
+            {
+                id: 'qa-sentinel', name: 'QA Sentinel', role: '验收哨兵',
+                summary: '专注验收与巡检，确保工位信息、公告牌与交互状态始终正确。',
+                board: '公告牌：待确认「场景复位、重复进入、故障提示」。',
+                status: '桌面状态：工位旁的检查灯是绿色，测试清单保持展开。',
+                accent: '#ff6b6b', deskColor: 0x341f23, outfitColor: 0xff9d9d,
+                x: 10.7, z: -4.4, facing: -Math.PI / 8, focus: { x: 10.7, y: 3.2, z: -4.1 }, offset: { x: -3.8, y: 4.1, z: 5.8 }, accessory: 'antenna'
+            }
+        ];
+
+        const selectorButtons = Array.from(document.querySelectorAll('[data-space-target]'));
+        const setActiveButton = (id) => {
+            selectorButtons.forEach(btn => btn.classList.toggle('is-active', btn.dataset.spaceTarget === id));
+        };
+        const renderDetail = (station) => {
+            if (!station) return;
+            detailEls.name.textContent = station.name;
+            detailEls.role.textContent = station.role;
+            detailEls.text.textContent = station.summary;
+            detailEls.board.textContent = station.board;
+            detailEls.status.textContent = station.status;
+            setActiveButton(station.id);
+        };
+
+        renderDetail(workstations[0]);
+
+        try {
+            const THREE = await import('https://esm.sh/three@0.165.0');
+            const controlsModule = await import('https://esm.sh/three@0.165.0/examples/jsm/controls/OrbitControls?deps=three@0.165.0');
+            if (document.querySelector('.page.active')?.id !== 'page-space') return;
+
+            const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+            renderer.setSize(mount.clientWidth || window.innerWidth, mount.clientHeight || window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            renderer.outputColorSpace = THREE.SRGBColorSpace;
+            mount.innerHTML = '';
+            mount.appendChild(renderer.domElement);
+
+            const scene = new THREE.Scene();
+            scene.fog = new THREE.Fog(0x0c1016, 18, 42);
+            const camera = new THREE.PerspectiveCamera(45, (mount.clientWidth || 1) / Math.max(mount.clientHeight || 1, 1), 0.1, 200);
+            camera.position.set(0, 9.2, 23.5);
+            const controls = new controlsModule.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.08;
+            controls.minDistance = 7;
+            controls.maxDistance = 30;
+            controls.maxPolarAngle = Math.PI / 2.05;
+            controls.target.set(0, 2.4, -1.8);
+
+            scene.add(new THREE.AmbientLight(0xffffff, 1.2));
+            const mainLight = new THREE.DirectionalLight(0xe5f0ff, 1.5);
+            mainLight.position.set(6, 12, 10);
+            mainLight.castShadow = true;
+            mainLight.shadow.mapSize.set(2048, 2048);
+            mainLight.shadow.camera.left = -24;
+            mainLight.shadow.camera.right = 24;
+            mainLight.shadow.camera.top = 24;
+            mainLight.shadow.camera.bottom = -24;
+            scene.add(mainLight);
+            const fillLight = new THREE.PointLight(0x8bb6ff, 1.1, 40, 2);
+            fillLight.position.set(-10, 8, 6);
+            scene.add(fillLight);
+            const rimLight = new THREE.PointLight(0xd8b4fe, 0.9, 34, 2);
+            rimLight.position.set(12, 6, -9);
+            scene.add(rimLight);
+
+            const createMaterial = (color, extras = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.72, metalness: 0.16, ...extras });
+            const floor = new THREE.Mesh(new THREE.BoxGeometry(34, 0.6, 20), createMaterial(0x11151c, { roughness: 0.92, metalness: 0.08 }));
+            floor.position.set(0, -0.3, 0);
+            floor.receiveShadow = true;
+            scene.add(floor);
+            const wallMaterial = createMaterial(0x1c212d, { roughness: 0.84, metalness: 0.1 });
+            const backWall = new THREE.Mesh(new THREE.BoxGeometry(34, 10, 0.4), wallMaterial);
+            backWall.position.set(0, 4.7, -9.9);
+            scene.add(backWall);
+            const leftWall = new THREE.Mesh(new THREE.BoxGeometry(0.4, 10, 20), wallMaterial);
+            leftWall.position.set(-16.9, 4.7, 0);
+            scene.add(leftWall);
+            const rightWall = leftWall.clone();
+            rightWall.position.x = 16.9;
+            scene.add(rightWall);
+            const grid = new THREE.GridHelper(34, 24, 0x334155, 0x1f2937);
+            grid.position.y = 0.01;
+            grid.material.opacity = 0.18;
+            grid.material.transparent = true;
+            scene.add(grid);
+
+            const raycaster = new THREE.Raycaster();
+            const pointer = new THREE.Vector2();
+            const clickable = [];
+            let selected = workstations[0];
+            let tween = null;
+
+            const createBoardTexture = (station) => {
+                const canvas = document.createElement('canvas');
+                canvas.width = 512;
+                canvas.height = 320;
+                const ctx = canvas.getContext('2d');
+                ctx.fillStyle = 'rgba(15,17,24,0.96)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+                gradient.addColorStop(0, station.accent);
+                gradient.addColorStop(1, 'rgba(255,255,255,0.1)');
+                ctx.strokeStyle = gradient;
+                ctx.lineWidth = 12;
+                ctx.strokeRect(18, 18, canvas.width - 36, canvas.height - 36);
+                ctx.fillStyle = 'rgba(255,255,255,0.78)';
+                ctx.font = '700 34px Cascadia Mono, monospace';
+                ctx.fillText(station.name, 34, 70);
+                ctx.fillStyle = station.accent;
+                ctx.font = '600 24px sans-serif';
+                ctx.fillText(station.role, 34, 112);
+                ctx.fillStyle = 'rgba(255,255,255,0.72)';
+                ctx.font = '22px sans-serif';
+                const lines = [station.summary, station.status];
+                let y = 160;
+                lines.forEach(line => {
+                    let current = '';
+                    String(line).split('').forEach(char => {
+                        const next = current + char;
+                        if (ctx.measureText(next).width > 420 && current) {
+                            ctx.fillText(current, 34, y);
+                            y += 32;
+                            current = char;
+                        } else {
+                            current = next;
+                        }
+                    });
+                    if (current) {
+                        ctx.fillText(current, 34, y);
+                        y += 32;
+                    }
+                });
+                return new THREE.CanvasTexture(canvas);
+            };
+
+            const makeAccessory = (station) => {
+                const accent = createMaterial(station.accent, { emissive: station.accent, emissiveIntensity: 0.1 });
+                const dark = createMaterial(0x0f172a);
+                if (station.accessory === 'visor') {
+                    const visor = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.18, 0.18), accent);
+                    visor.position.set(0, 3.6, 0.55);
+                    return [visor];
+                }
+                if (station.accessory === 'headphones') {
+                    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.72, 0.08, 12, 24, Math.PI), accent);
+                    ring.position.set(0, 3.68, 0);
+                    ring.rotation.z = Math.PI;
+                    return [ring];
+                }
+                if (station.accessory === 'glasses') {
+                    const glasses = new THREE.Mesh(new THREE.BoxGeometry(1, 0.16, 0.12), dark);
+                    glasses.position.set(0, 3.52, 0.58);
+                    return [glasses];
+                }
+                if (station.accessory === 'cap') {
+                    const cap = new THREE.Mesh(new THREE.SphereGeometry(0.74, 18, 18, 0, Math.PI * 2, 0, Math.PI / 2), accent);
+                    cap.position.set(0, 3.9, 0.02);
+                    return [cap];
+                }
+                const antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.9, 12), accent);
+                antenna.position.set(0.28, 4.18, 0.02);
+                const ball = new THREE.Mesh(new THREE.SphereGeometry(0.12, 16, 16), accent);
+                ball.position.set(0.28, 4.65, 0.02);
+                return [antenna, ball];
+            };
+
+            const focusStation = (station, animated = true) => {
+                if (!station) return;
+                selected = station;
+                renderDetail(station);
+                const target = new THREE.Vector3(station.focus.x, station.focus.y, station.focus.z);
+                const position = new THREE.Vector3(station.focus.x + station.offset.x, station.focus.y + station.offset.y, station.focus.z + station.offset.z);
+                if (!animated) {
+                    camera.position.copy(position);
+                    controls.target.copy(target);
+                    controls.update();
+                    return;
+                }
+                tween = {
+                    startedAt: performance.now(),
+                    duration: 650,
+                    fromPosition: camera.position.clone(),
+                    fromTarget: controls.target.clone(),
+                    toPosition: position,
+                    toTarget: target
+                };
+            };
+            selectorButtons.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const station = workstations.find(item => item.id === btn.dataset.spaceTarget);
+                    if (station) focusStation(station, true);
+                });
+            });
+
+            workstations.forEach((station) => {
+                const root = new THREE.Group();
+                root.position.set(station.x, 0, station.z);
+                root.rotation.y = station.facing;
+                root.userData.stationId = station.id;
+
+                const deskMaterial = createMaterial(station.deskColor);
+                const accentMaterial = createMaterial(station.accent, { emissive: station.accent, emissiveIntensity: 0.12 });
+                const darkMaterial = createMaterial(0x0f172a);
+                const skin = createMaterial(0xf7d7be);
+                const outfit = createMaterial(station.outfitColor);
+
+                const deskTop = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.16, 1.3), deskMaterial);
+                deskTop.position.set(0, 1.4, 0); deskTop.castShadow = true; deskTop.receiveShadow = true; root.add(deskTop);
+                [-1.05, 1.05].forEach(x => [-0.45, 0.45].forEach(z => {
+                    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.14, 1.35, 0.14), darkMaterial);
+                    leg.position.set(x, 0.72, z); leg.castShadow = true; root.add(leg);
+                }));
+                const chairSeat = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.12, 0.9), accentMaterial);
+                chairSeat.position.set(0, 0.96, 1.4); root.add(chairSeat);
+                const chairBack = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.08, 0.12), accentMaterial);
+                chairBack.position.set(0, 1.46, 1.02); root.add(chairBack);
+                const screenBase = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.16, 0.48, 14), darkMaterial);
+                screenBase.position.set(0, 1.74, -0.08); root.add(screenBase);
+                const screen = new THREE.Mesh(new THREE.BoxGeometry(1.16, 0.82, 0.08), createMaterial(0xeff6ff, { emissive: station.accent, emissiveIntensity: 0.18 }));
+                screen.position.set(0, 2.18, -0.14); root.add(screen);
+                const keyboard = new THREE.Mesh(new THREE.BoxGeometry(0.88, 0.05, 0.32), createMaterial(0xe5e7eb));
+                keyboard.position.set(0, 1.5, 0.34); root.add(keyboard);
+                const mug = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 0.45, 18), createMaterial(station.accent, { emissive: station.accent, emissiveIntensity: 0.18 }));
+                mug.scale.set(1, 0.7, 1); mug.position.set(-0.74, 1.64, 0.2); root.add(mug);
+
+                const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.62, 1.3, 6, 14), outfit);
+                body.position.set(0, 2.15, 0.8); body.castShadow = true; body.userData.stationId = station.id; root.add(body);
+                const head = new THREE.Mesh(new THREE.SphereGeometry(0.66, 24, 24), skin);
+                head.position.set(0, 3.55, 0.8); head.castShadow = true; head.userData.stationId = station.id; root.add(head);
+                const leftLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 1.2, 14), darkMaterial);
+                leftLeg.position.set(-0.24, 0.84, 0.8); leftLeg.userData.stationId = station.id; root.add(leftLeg);
+                const rightLeg = leftLeg.clone(); rightLeg.position.x = 0.24; root.add(rightLeg);
+                const leftArm = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 1.15, 14), outfit);
+                leftArm.position.set(-0.8, 2.28, 0.8); leftArm.rotation.z = Math.PI / 5; leftArm.userData.stationId = station.id; root.add(leftArm);
+                const rightArm = leftArm.clone(); rightArm.position.x = 0.8; rightArm.rotation.z = -Math.PI / 5; root.add(rightArm);
+                makeAccessory(station).forEach(mesh => { mesh.userData.stationId = station.id; root.add(mesh); });
+
+                const boardTexture = createBoardTexture(station);
+                const board = new THREE.Mesh(new THREE.PlaneGeometry(1.95, 1.2), new THREE.MeshStandardMaterial({ map: boardTexture, roughness: 0.78, metalness: 0.04 }));
+                board.position.set(0, 1.95, 2.7); board.userData.stationId = station.id; root.add(board);
+                const boardFrame = new THREE.Mesh(new THREE.BoxGeometry(2.06, 1.32, 0.12), darkMaterial);
+                boardFrame.position.set(0, 1.95, 2.64); root.add(boardFrame);
+                const halo = new THREE.Mesh(new THREE.CylinderGeometry(1.55, 1.55, 0.04, 40), createMaterial(station.accent, { emissive: station.accent, emissiveIntensity: 0.3, transparent: true, opacity: 0.24 }));
+                halo.position.set(0, 0.03, 1.1); root.add(halo);
+                scene.add(root);
+                root.traverse(child => { if (child.userData.stationId) clickable.push(child); });
+            });
+
+            focusStation(workstations[0], false);
+
+            const onPointerDown = (event) => {
+                const rect = renderer.domElement.getBoundingClientRect();
+                pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+                pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+                raycaster.setFromCamera(pointer, camera);
+                const hit = raycaster.intersectObjects(clickable, true)[0];
+                let target = hit && hit.object;
+                while (target && !target.userData.stationId) target = target.parent;
+                const station = workstations.find(item => item.id === target?.userData?.stationId);
+                if (station) focusStation(station, true);
+            };
+
+            const onResize = () => {
+                const width = mount.clientWidth || window.innerWidth;
+                const height = mount.clientHeight || window.innerHeight;
+                camera.aspect = width / Math.max(height, 1);
+                camera.updateProjectionMatrix();
+                renderer.setSize(width, height);
+            };
+
+            const animateSpace = (now = performance.now()) => {
+                if (mount.__spaceDestroyed) return;
+                mount.__spaceFrame = requestAnimationFrame(animateSpace);
+                if (tween) {
+                    const progress = Math.min((now - tween.startedAt) / tween.duration, 1);
+                    const eased = 1 - Math.pow(1 - progress, 3);
+                    camera.position.lerpVectors(tween.fromPosition, tween.toPosition, eased);
+                    controls.target.lerpVectors(tween.fromTarget, tween.toTarget, eased);
+                    if (progress >= 1) tween = null;
+                }
+                controls.update();
+                renderer.render(scene, camera);
+            };
+
+            mount.__spaceDestroyed = false;
+            mount.__spaceRenderer = renderer;
+            mount.__spaceScene = scene;
+            mount.__spaceCamera = camera;
+            mount.__spaceControls = controls;
+            mount.__spaceResize = onResize;
+            mount.__spacePointer = onPointerDown;
+            renderer.domElement.addEventListener('pointerdown', onPointerDown);
+            window.addEventListener('resize', onResize);
+            animateSpace();
+            if (statusEl) {
+                statusEl.textContent = '空间已就绪，点击任意工位或公告牌即可查看详情。';
+                statusEl.dataset.tone = 'ready';
+            }
+        } catch (error) {
+            console.error('Failed to load /space scene.', error);
+            mount.dataset.ready = '';
+            if (statusEl) {
+                statusEl.textContent = '空间加载失败，请检查网络或稍后重试。';
+                statusEl.dataset.tone = 'error';
+            }
+        }
+    }
+
+    function disposeSpaceScene() {
+        void import('./space-page.mjs').then(({ disposeSpacePage }) => disposeSpacePage());
+        return;
+
+        const mount = document.getElementById('spaceCanvas');
+        if (!mount || !mount.dataset.ready) return;
+        mount.__spaceDestroyed = true;
+        if (mount.__spaceFrame) cancelAnimationFrame(mount.__spaceFrame);
+        if (mount.__spaceRenderer?.domElement && mount.__spacePointer) {
+            mount.__spaceRenderer.domElement.removeEventListener('pointerdown', mount.__spacePointer);
+        }
+        if (mount.__spaceResize) window.removeEventListener('resize', mount.__spaceResize);
+        mount.__spaceControls?.dispose?.();
+        mount.__spaceScene?.traverse?.((node) => {
+            if (node.material?.map) node.material.map.dispose?.();
+            node.material?.dispose?.();
+            node.geometry?.dispose?.();
+        });
+        mount.__spaceRenderer?.dispose?.();
+        mount.innerHTML = '';
+        mount.dataset.ready = '';
+        delete mount.__spaceFrame;
+        delete mount.__spaceRenderer;
+        delete mount.__spaceScene;
+        delete mount.__spaceCamera;
+        delete mount.__spaceControls;
+        delete mount.__spaceResize;
+        delete mount.__spacePointer;
+        delete mount.__spaceDestroyed;
+    }
+
+    if (window.location.hash === '#/space') {
+        setTimeout(() => window.navigate('space'), 0);
+    }
 
     // == SCROLL REVEAL ==
     const srObs = new IntersectionObserver((entries) => {

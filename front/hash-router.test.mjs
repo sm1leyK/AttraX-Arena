@@ -17,11 +17,13 @@ const appSource = readFileSync(join(currentDir, "app.mjs"), "utf8");
 test("builds stable hash routes for pages and posts", () => {
   assert.equal(buildPageHash("profile"), "#/profile");
   assert.equal(buildPageHash("detail"), "#/detail");
+  assert.equal(buildPageHash("space"), "#/space");
   assert.equal(buildPostHash("post 1"), "#/post/post%201");
 });
 
 test("parses hash routes for direct page and post links", () => {
   assert.deepEqual(parseHashRoute("#/create"), { page: "create", postId: "" });
+  assert.deepEqual(parseHashRoute("#/space"), { page: "space", postId: "" });
   assert.deepEqual(parseHashRoute("#/post/abc-123"), { page: "detail", postId: "abc-123" });
   assert.deepEqual(parseHashRoute("#/missing"), { page: "home", postId: "" });
 });

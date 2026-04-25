@@ -1,4 +1,4 @@
-const ROUTABLE_PAGES = new Set(["home", "create", "auth", "profile", "leaderboard", "activity", "detail"]);
+const ROUTABLE_PAGES = new Set(["home", "create", "auth", "profile", "leaderboard", "activity", "detail", "space"]);
 
 export function buildPageHash(page) {
   const normalizedPage = normalizePage(page);

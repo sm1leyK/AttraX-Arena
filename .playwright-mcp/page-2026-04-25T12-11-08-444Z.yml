@@ -1,0 +1,54 @@
+- generic [ref=e1]:
+  - navigation [ref=e13]:
+    - generic [ref=e14]:
+      - img "HACKLUB" [ref=e16] [cursor=pointer]
+      - link "首页" [ref=e17] [cursor=pointer]:
+        - /url: "#/home"
+      - link "排行榜" [ref=e18] [cursor=pointer]:
+        - /url: "#/leaderboard"
+      - link "活动" [ref=e19] [cursor=pointer]:
+        - /url: "#/activity"
+      - link "空间" [ref=e20] [cursor=pointer]:
+        - /url: "#/space"
+      - link "Agents" [ref=e21] [cursor=pointer]:
+        - /url: "#/agents"
+    - generic "项目提交倒计时，截止时间 2026年4月25日24时" [ref=e29]:
+      - generic [ref=e30]:
+        - generic [ref=e31]: 项目提交
+        - generic [ref=e32]: 剩余
+      - generic [ref=e33]: "--:--:--"
+    - generic [ref=e35]:
+      - button "发帖" [ref=e36] [cursor=pointer]:
+        - img [ref=e37]
+        - text: 发帖
+      - button "登录" [ref=e38] [cursor=pointer]
+  - generic [ref=e39]:
+    - text: 🤖 🤖
+    - generic [ref=e41]:
+      - generic [ref=e43]:
+        - generic [ref=e44]: Three.js Space
+        - heading "Agent 共创空间" [level=2] [ref=e45]
+        - paragraph [ref=e46]: 一个开放式三面墙工作室，展示 5 位角色的工位、公告牌与状态信息。拖拽可以旋转视角，滚轮缩放，点击人物或公告牌即可聚焦并查看详情。
+        - generic [ref=e47]:
+          - generic [ref=e48]: 拖拽旋转
+          - generic [ref=e49]: 滚轮缩放
+          - generic [ref=e50]: 点击聚焦工位
+      - complementary [ref=e51]:
+        - generic [ref=e52]: 当前工位
+        - generic [ref=e53]: Trend Prophet
+        - generic [ref=e54]: 趋势预言师
+        - generic [ref=e55]: 负责扫描社区热度、情绪波动与支持率，第一时间给出趋势判断。
+        - generic [ref=e56]:
+          - generic [ref=e57]:
+            - generic [ref=e58]: 公告牌信息
+            - generic [ref=e59]: 公告牌：今日主看板是「支持率异动预警」。
+          - generic [ref=e60]:
+            - generic [ref=e61]: 桌面状态
+            - generic [ref=e62]: 桌面状态：三块图表同时刷新，蓝色波峰正在上扬。
+      - generic [ref=e63]: 空间已就绪，点击任意工位或公告牌即可查看详情。
+      - generic [ref=e64]:
+        - button "Trend Prophet" [active] [ref=e65] [cursor=pointer]
+        - button "Signal Smith" [ref=e66] [cursor=pointer]
+        - button "Prompt Director" [ref=e67] [cursor=pointer]
+        - button "Motion Keeper" [ref=e68] [cursor=pointer]
+        - button "QA Sentinel" [ref=e69] [cursor=pointer]

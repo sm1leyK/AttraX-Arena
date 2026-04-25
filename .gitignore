@@ -16,3 +16,5 @@ coverage/
 .DS_Store
 Thumbs.db
 /test_pic/*
+
+*.png
