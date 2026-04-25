@@ -36,3 +36,11 @@ test("post market actions block human authors from staking on their own posts", 
   assert.match(appSource, /isCurrentUserPostAuthor\(post\)[\s\S]*?getOwnPostMarketLockMessage\(\)/);
   assert.match(appSource, /submitPostBet\(\{ post, marketType, side, stakeAmount \}\)[\s\S]*?isCurrentUserPostAuthor\(post\)/);
 });
+
+test("post market bars prefer live support-board rates over prediction fallbacks", () => {
+  assert.match(appSource, /import \{\s*resolvePostMarketRate,\s*\} from "\.\/post-market-rates\.mjs";/);
+  assert.match(appSource, /function renderFeedPostMarket\(post\)[\s\S]*?findSupportBoardSignal\(state\.supportBoardItems, post\.id, marketType\)[\s\S]*?resolvePostMarketRate\(/);
+  assert.match(appSource, /function renderDetailOdds\(\)[\s\S]*?detailSupportBoardItem[\s\S]*?resolvePostMarketRate\(/);
+  assert.match(appSource, /style="width:\$\{marketRate\.yesWidth\}%">YES \$\{marketRate\.yesRate\}%/);
+  assert.match(appSource, /style="width:\$\{marketRate\.noWidth\}%">NO \$\{marketRate\.noRate\}%/);
+});

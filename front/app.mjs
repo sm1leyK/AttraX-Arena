@@ -70,6 +70,9 @@ import {
   renderPostImage as renderFeedPostImage,
 } from "./post-media-render.mjs";
 import {
+  resolvePostMarketRate,
+} from "./post-market-rates.mjs";
+import {
   buildLensAgentInsight,
   findSupportBoardSignal,
 } from "./agent-insights.mjs";
@@ -1485,16 +1488,17 @@ function renderFeedPostMarket(post) {
   }
 
   const marketType = Number(post.flamewar_probability || 0) >= 60 ? "flamewar" : "hot_24h";
-  const yesProbability = clampNumber(
-    Math.round(
-      marketType === "flamewar"
-        ? Number(post.flamewar_probability || 52)
-        : Number(post.hot_probability || 52),
-    ),
-    6,
-    94,
-  );
-  const noProbability = 100 - yesProbability;
+  const fallbackProbability = marketType === "flamewar"
+    ? Number(post.flamewar_probability || 52)
+    : Number(post.hot_probability || 52);
+  const supportBoardSignal = findSupportBoardSignal(state.supportBoardItems, post.id, marketType);
+  const marketRate = resolvePostMarketRate({
+    post,
+    marketType,
+    supportBoardSignal,
+    fallbackProbability,
+    clampNumber,
+  });
   const marketLabel = marketType === "flamewar" ? "引战站队" : "爆帖站队";
   const marketDeadline = resolveMarketDeadline({ post, marketType });
   const lockedSide = getMarketPositionSide(getUserPostMarketBets(post.id), marketType);
@@ -1511,12 +1515,13 @@ function renderFeedPostMarket(post) {
     <div class="post-market-inline" data-countdown-key="feed-${escapeAttribute(post.id)}" data-market-deadline="${escapeAttribute(marketDeadline || "")}">
       <div class="post-market-inline-top">
         <span class="post-market-inline-label">${marketLabel}</span>
+        <span class="prediction-odds-chip">${escapeHtml(marketRate.sourceLabel)}</span>
         ${marketType === "flamewar" ? '<span class="prediction-odds-chip">YES = 会引战</span>' : ""}
       </div>
       ${renderCountdownMarkup({ compact: true })}
       <div class="post-market-inline-track">
-        <div class="post-market-inline-fill yes" style="width:${yesProbability}%">YES ${yesProbability}%</div>
-        <div class="post-market-inline-fill no" style="width:${noProbability}%">NO ${noProbability}%</div>
+        <div class="post-market-inline-fill yes" style="width:${marketRate.yesWidth}%">YES ${marketRate.yesRate}%</div>
+        <div class="post-market-inline-fill no" style="width:${marketRate.noWidth}%">NO ${marketRate.noRate}%</div>
       </div>
       <div class="post-market-inline-actions">
         <button class="post-market-inline-btn primary" type="button" data-action="feed-post-side" data-post-id="${post.id}" data-market-type="${marketType}" data-side="yes" data-stake="50"${yesDisabledAttr}>${yesButtonText}</button>
@@ -4425,15 +4430,27 @@ function renderDetailOdds() {
   const primaryPrediction = hotPrediction ?? flamePrediction ?? roastPrediction;
   const marketType = getPrimaryDetailMarketType(post, state.detailPredictions);
   const marketDeadline = resolveMarketDeadline({ post, prediction: primaryPrediction, marketType });
-  const yesProbability = clampNumber(Math.round(primaryPrediction?.probability ?? post.hot_probability ?? 52), 6, 94);
-  const noProbability = 100 - yesProbability;
+  const fallbackProbability = primaryPrediction?.probability ?? post.hot_probability ?? 52;
+  const supportBoardSignal = findSupportBoardSignal(state.supportBoardItems, post.id, marketType);
+  const detailSupportBoardItem = state.detailPostId === post.id
+    && state.detailSupportBoardMarketType === marketType
+    ? state.detailSupportBoardItem
+    : null;
+  const marketRate = resolvePostMarketRate({
+    post,
+    marketType,
+    supportBoardSignal,
+    detailSupportBoardItem,
+    fallbackProbability,
+    clampNumber,
+  });
+  const yesProbability = marketRate.yesRate;
   const marketQuestion = post.title || "Untitled post";
   const marketLabel = marketType === "flamewar"
     ? "Flame-War Market"
     : marketType === "get_roasted"
       ? "Roast Risk Market"
       : "Hot Market";
-  const supportBoardSignal = findSupportBoardSignal(state.supportBoardItems, post.id, marketType);
   const lensInsight = readLensAgentInsight(post, {
     supportBoardSignal,
   });
@@ -4510,7 +4527,7 @@ function renderDetailOdds() {
         <div>
           <div class="post-market-kicker">${escapeHtml(marketLabel)}</div>
           <div class="post-market-question">${escapeHtml(marketQuestion)}</div>
-          <div class="post-market-sub">YES / NO 会扣除钱包 oute，并按下注时 odds 锁定结算倍率。</div>
+          <div class="post-market-sub">${escapeHtml(marketRate.sourceLabel)} · YES / NO 会扣除钱包 oute，并按下注时 odds 锁定结算倍率。</div>
         </div>
         <div class="post-market-balance">
           <span>Stake</span>
@@ -4520,8 +4537,8 @@ function renderDetailOdds() {
       ${renderCountdownMarkup()}
       <div class="post-market-track-wrap">
         <div class="post-market-track">
-          <div class="post-market-fill yes" style="width:${yesProbability}%">YES ${yesProbability}%</div>
-          <div class="post-market-fill no" style="width:${noProbability}%">NO ${noProbability}%</div>
+          <div class="post-market-fill yes" style="width:${marketRate.yesWidth}%">YES ${yesProbability}%</div>
+          <div class="post-market-fill no" style="width:${marketRate.noWidth}%">NO ${marketRate.noRate}%</div>
         </div>
       </div>
       ${detailSupportTrendMarkup}
