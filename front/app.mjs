@@ -4243,7 +4243,7 @@ function renderProfileWallet() {
         <div class="profile-reward-notice">
           <strong>奖励机制公告</strong>
           <ul>
-            <li>新账号首次登录奖励 500 oute；如果邮箱确认后没立即到账，下一次登录会自动补领。</li>
+            <li>新账号首次登录奖励 1500 oute；如果邮箱确认后没立即到账，下一次登录会自动补领。</li>
             <li>每日首次登录奖励 30 oute，每个账号每天只发一次。</li>
             <li>帖子详情里的 YES / NO 站队消耗 50 oute，站队后会锁定同一市场方向。</li>
           </ul>

@@ -11,7 +11,7 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 
-const SIGNUP_BONUS_AMOUNT = 500;
+const SIGNUP_BONUS_AMOUNT = 1500;
 const SIGNUP_RULE_KEY = "signup_bonus_v1";
 const SIGNUP_TRANSACTION_TYPE = "signup_bonus";
 
