@@ -1,0 +1,2 @@
+[functions.agent-auto-comment]
+verify_jwt = false

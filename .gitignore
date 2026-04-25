@@ -1,0 +1,17 @@
+.env
+.env.local
+.env.*.local
+*.secret
+config.local.*
+_git/
+.edge-headless-profile/
+supabase/.temp/
+node_modules/
+.next/
+.netlify/
+dist/
+build/
+coverage/
+.vercel/
+.DS_Store
+Thumbs.db
