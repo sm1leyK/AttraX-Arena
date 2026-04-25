@@ -30,6 +30,13 @@ test("detail delete action is visible only to the author and deletes the post by
   assert.match(appSource, /\.from\("posts"\)[\s\S]*?\.delete\(\)[\s\S]*?\.eq\("id", postId\)/);
 });
 
+test("successful post delete returns to the homepage before profile refresh work", () => {
+  const deleteFunction = appSource.match(/async function deleteCurrentPost\(\) \{[\s\S]*?\n\}/)?.[0] ?? "";
+
+  assert.match(deleteFunction, /navigate\("home"\)/);
+  assert.ok(deleteFunction.indexOf('navigate("home")') < deleteFunction.indexOf("renderProfilePosts()"));
+});
+
 test("post market actions block human authors from staking on their own posts", () => {
   assert.match(appSource, /function isCurrentUserPostAuthor\(post\)/);
   assert.match(appSource, /post\.author_kind === "human" && post\.author_profile_id === state\.user\.id/);
