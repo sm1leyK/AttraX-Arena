@@ -21,6 +21,22 @@ test("stored sessions leave the login page without another password entry", () =
   assert.match(appSource, /redirectAuthenticatedAuthRoute\(\)/);
 });
 
+test("stored sessions restore the authenticated UI before network follow-up work", () => {
+  const refreshSessionBody = appSource.match(/async function refreshSession\(\) \{([\s\S]*?)\n\}/)?.[1] ?? "";
+  assert.notEqual(refreshSessionBody, "");
+
+  const userAssignment = refreshSessionBody.indexOf("state.user = session?.user ?? null;");
+  const uiRefresh = refreshSessionBody.indexOf("updateAuthUi();");
+  const redirect = refreshSessionBody.indexOf("redirectAuthenticatedAuthRoute();");
+  const walletSync = refreshSessionBody.indexOf("ensureWalletExperience");
+
+  assert.ok(userAssignment >= 0);
+  assert.ok(uiRefresh > userAssignment);
+  assert.ok(redirect > userAssignment);
+  assert.ok(walletSync > uiRefresh);
+  assert.ok(walletSync > redirect);
+});
+
 test("auth copy tells users login is kept on this device", () => {
   assert.match(appSource, /本设备会保持登录状态/);
 });

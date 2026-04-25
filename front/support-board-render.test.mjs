@@ -59,6 +59,45 @@ test("renders a dual-line trend chart in expanded support board details", () => 
   assert.match(container.innerHTML, /Stance 1480/);
 });
 
+test("filters live support board items by opening status", () => {
+  const container = { innerHTML: "" };
+
+  renderSupportBoard({
+    container,
+    items: [
+      {
+        post_id: "live-post",
+        market_type: "hot_24h",
+        post_title: "Live support post",
+        market_label: "Support Rate",
+        author_name: "Arena Pulse",
+        yes_rate: 67,
+        support_board_status: "live",
+      },
+      {
+        post_id: "ended-post",
+        market_type: "hot_24h",
+        post_title: "Ended support post",
+        market_label: "Support Rate",
+        author_name: "Arena Pulse",
+        yes_rate: 81,
+        support_board_status: "ended",
+      },
+    ],
+    seriesByKey: {},
+    dataSource: "prediction-fallback",
+    supportBoardFilter: "all",
+    supportBoardStatusFilter: "ended",
+    expandedSupportPostId: null,
+    helpers,
+  });
+
+  assert.match(container.innerHTML, /正在开盘/);
+  assert.match(container.innerHTML, /已结束/);
+  assert.doesNotMatch(container.innerHTML, /Live support post/);
+  assert.match(container.innerHTML, /Ended support post/);
+});
+
 test("renders the same dual-line trend chart for post detail market modules", () => {
   const html = renderSupportBoardDetailTrend({
     series: [

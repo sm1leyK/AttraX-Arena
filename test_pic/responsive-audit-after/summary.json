@@ -1,0 +1,194 @@
+{
+  "failures": [],
+  "summary": [
+    {
+      "viewport": "small-android",
+      "page": "home",
+      "navLinksDisplay": "none",
+      "navRightRight": 344,
+      "viewportWidth": 360,
+      "scrollWidth": 360,
+      "offscreenActions": 0
+    },
+    {
+      "viewport": "small-android",
+      "page": "leaderboard",
+      "navLinksDisplay": "none",
+      "navRightRight": 344,
+      "viewportWidth": 360,
+      "scrollWidth": 360,
+      "offscreenActions": 0
+    },
+    {
+      "viewport": "small-android",
+      "page": "activity",
+      "navLinksDisplay": "none",
+      "navRightRight": 344,
+      "viewportWidth": 360,
+      "scrollWidth": 360,
+      "offscreenActions": 0
+    },
+    {
+      "viewport": "small-android",
+      "page": "detail",
+      "navLinksDisplay": "none",
+      "navRightRight": 344,
+      "viewportWidth": 360,
+      "scrollWidth": 360,
+      "offscreenActions": 0
+    },
+    {
+      "viewport": "small-android",
+      "page": "create",
+      "navLinksDisplay": "none",
+      "navRightRight": 344,
+      "viewportWidth": 360,
+      "scrollWidth": 360,
+      "offscreenActions": 0
+    },
+    {
+      "viewport": "small-android",
+      "page": "auth",
+      "navLinksDisplay": "none",
+      "navRightRight": 344,
+      "viewportWidth": 360,
+      "scrollWidth": 360,
+      "offscreenActions": 0
+    },
+    {
+      "viewport": "small-android",
+      "page": "profile",
+      "navLinksDisplay": "none",
+      "navRightRight": 344,
+      "viewportWidth": 360,
+      "scrollWidth": 360,
+      "offscreenActions": 0
+    },
+    {
+      "viewport": "iphone-se",
+      "page": "home",
+      "navLinksDisplay": "none",
+      "navRightRight": 359,
+      "viewportWidth": 375,
+      "scrollWidth": 375,
+      "offscreenActions": 0
+    },
+    {
+      "viewport": "iphone-se",
+      "page": "leaderboard",
+      "navLinksDisplay": "none",
+      "navRightRight": 359,
+      "viewportWidth": 375,
+      "scrollWidth": 375,
+      "offscreenActions": 0
+    },
+    {
+      "viewport": "iphone-se",
+      "page": "activity",
+      "navLinksDisplay": "none",
+      "navRightRight": 359,
+      "viewportWidth": 375,
+      "scrollWidth": 375,
+      "offscreenActions": 0
+    },
+    {
+      "viewport": "iphone-se",
+      "page": "detail",
+      "navLinksDisplay": "none",
+      "navRightRight": 359,
+      "viewportWidth": 375,
+      "scrollWidth": 375,
+      "offscreenActions": 0
+    },
+    {
+      "viewport": "iphone-se",
+      "page": "create",
+      "navLinksDisplay": "none",
+      "navRightRight": 359,
+      "viewportWidth": 375,
+      "scrollWidth": 375,
+      "offscreenActions": 0
+    },
+    {
+      "viewport": "iphone-se",
+      "page": "auth",
+      "navLinksDisplay": "none",
+      "navRightRight": 359,
+      "viewportWidth": 375,
+      "scrollWidth": 375,
+      "offscreenActions": 0
+    },
+    {
+      "viewport": "iphone-se",
+      "page": "profile",
+      "navLinksDisplay": "none",
+      "navRightRight": 359,
+      "viewportWidth": 375,
+      "scrollWidth": 375,
+      "offscreenActions": 0
+    },
+    {
+      "viewport": "iphone-14",
+      "page": "home",
+      "navLinksDisplay": "none",
+      "navRightRight": 374,
+      "viewportWidth": 390,
+      "scrollWidth": 390,
+      "offscreenActions": 0
+    },
+    {
+      "viewport": "iphone-14",
+      "page": "leaderboard",
+      "navLinksDisplay": "none",
+      "navRightRight": 374,
+      "viewportWidth": 390,
+      "scrollWidth": 390,
+      "offscreenActions": 0
+    },
+    {
+      "viewport": "iphone-14",
+      "page": "activity",
+      "navLinksDisplay": "none",
+      "navRightRight": 374,
+      "viewportWidth": 390,
+      "scrollWidth": 390,
+      "offscreenActions": 0
+    },
+    {
+      "viewport": "iphone-14",
+      "page": "detail",
+      "navLinksDisplay": "none",
+      "navRightRight": 374,
+      "viewportWidth": 390,
+      "scrollWidth": 390,
+      "offscreenActions": 0
+    },
+    {
+      "viewport": "iphone-14",
+      "page": "create",
+      "navLinksDisplay": "none",
+      "navRightRight": 374,
+      "viewportWidth": 390,
+      "scrollWidth": 390,
+      "offscreenActions": 0
+    },
+    {
+      "viewport": "iphone-14",
+      "page": "auth",
+      "navLinksDisplay": "none",
+      "navRightRight": 374,
+      "viewportWidth": 390,
+      "scrollWidth": 390,
+      "offscreenActions": 0
+    },
+    {
+      "viewport": "iphone-14",
+      "page": "profile",
+      "navLinksDisplay": "none",
+      "navRightRight": 374,
+      "viewportWidth": 390,
+      "scrollWidth": 390,
+      "offscreenActions": 0
+    }
+  ]
+}

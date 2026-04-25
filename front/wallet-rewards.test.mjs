@@ -24,7 +24,7 @@ test("auth copy explains what to do after email confirmation", () => {
 
 test("profile wallet explains the oute reward rules", () => {
   assert.match(appSource, /新账号首次登录/);
-  assert.match(appSource, /500 oute/);
+  assert.match(appSource, /1500 oute/);
   assert.match(appSource, /每日首次登录/);
   assert.match(appSource, /30 oute/);
   assert.match(appSource, /YES \/ NO 站队消耗 50 oute/);

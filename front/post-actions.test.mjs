@@ -53,6 +53,17 @@ test("post market bars prefer live support-board rates over prediction fallbacks
   assert.match(appSource, /style="width:\$\{marketRate\.noWidth\}%">NO \$\{marketRate\.noRate\}%/);
 });
 
+test("new support-board posts default their deadline to the latest allowed time", () => {
+  assert.match(appSource, /deadlineInput\.max = SUPPORT_BOARD_MAX_DEADLINE_LOCAL/);
+  assert.match(appSource, /deadlineInput\.value = SUPPORT_BOARD_MAX_DEADLINE_LOCAL/);
+});
+
+test("support-board fallback cards inherit post deadline state for status filters", () => {
+  assert.match(appSource, /const supportPostById = new Map\(\s*state\.posts\.map\(\(post\) => \[post\.id, post\]\),\s*\);/);
+  assert.match(appSource, /support_board_deadline_at:\s*item\.support_board_deadline_at\s*\?\?\s*matchedPost\?\.support_board_deadline_at\s*\?\?\s*matchedPost\?\.deadline_at\s*\?\?\s*null/);
+  assert.match(appSource, /support_board_result:\s*item\.support_board_result\s*\?\?\s*matchedPost\?\.support_board_result\s*\?\?\s*null/);
+});
+
 test("detail comment composer stays outside the rerendered comments list", () => {
   const listStart = htmlSource.indexOf('id="detailCommentsList"');
   const composerStart = htmlSource.indexOf('class="comment-input-wrap"');
@@ -62,6 +73,41 @@ test("detail comment composer stays outside the rerendered comments list", () =>
   assert.ok(composerStart > findClosingDivIndex(htmlSource, listStart));
   assert.match(appSource, /els\.detailCommentsList\.innerHTML = state\.detailComments/);
   assert.match(htmlSource, /<button class="comment-submit" type="button">/);
+});
+
+test("detail comment action focuses the composer and Enter submits without blocking Shift Enter newlines", () => {
+  assert.match(appSource, /data-action="comment"/);
+  assert.match(appSource, /querySelector\('\[data-action="comment"\]'\)\?\.addEventListener\("click"/);
+  assert.match(appSource, /els\.commentInput\?\.scrollIntoView\(\{ block: "center" \}\)/);
+  assert.match(appSource, /els\.commentInput\?\.focus\(\)/);
+  assert.match(appSource, /els\.commentInput\?\.addEventListener\("keydown", \(event\) => \{/);
+  assert.match(appSource, /event\.key === "Enter" && !event\.shiftKey/);
+  assert.match(appSource, /event\.preventDefault\(\);[\s\S]*?void submitComment\(\)/);
+});
+
+test("detail comments render like reply and share actions without backend-only assumptions", () => {
+  assert.match(appSource, /COMMENT_INTERACTIONS_STORAGE_KEY/);
+  assert.match(appSource, /data-action="comment-like"/);
+  assert.match(appSource, /data-action="comment-reply"/);
+  assert.match(appSource, /data-action="comment-share"/);
+  assert.match(appSource, /function toggleCommentLike\(commentId\)/);
+  assert.match(appSource, /window\.localStorage\.setItem\(COMMENT_INTERACTIONS_STORAGE_KEY/);
+  assert.match(appSource, /function startCommentReply\(comment\)/);
+  assert.match(appSource, /els\.commentInput\.value = `@\$\{comment\.author_name \|\| "Unknown"\} `/);
+  assert.match(appSource, /function shareComment\(commentId\)/);
+  assert.match(appSource, /buildCommentShareUrl\(commentId\)/);
+  assert.match(appSource, /navigator\.clipboard\.writeText\(url\)/);
+});
+
+test("create post image picker shows an image preview instead of the file name", () => {
+  assert.match(htmlSource, /id="createUploadArea"/);
+  assert.match(htmlSource, /\.create-upload-area\.has-preview/);
+  assert.match(appSource, /function setCreateImagePreview\(file\)/);
+  assert.match(appSource, /URL\.createObjectURL\(file\)/);
+  assert.match(appSource, /els\.createUploadArea\.style\.backgroundImage = `url\("\$\{state\.createImagePreviewUrl\}"\)`/);
+  assert.match(appSource, /els\.createUploadArea\.classList\.add\("has-preview"\)/);
+  assert.match(appSource, /els\.createUploadArea\?\.addEventListener\("drop"/);
+  assert.doesNotMatch(appSource, /createUploadLabel\.textContent = state\.createImageFile[\s\S]*?createImageFile\.name/);
 });
 
 function findClosingDivIndex(source, openDivIndex) {

@@ -7,12 +7,12 @@
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         :root {
-            --bg-primary: #111111;
-            --bg-card: #1a1a1a;
-            --bg-card-hover: #222222;
-            --bg-input: #1e1e1e;
-            --border: #2a2a2a;
-            --border-light: #3a3a3a;
+            --bg-primary: #101113;
+            --bg-card: rgba(255,255,255,0.055);
+            --bg-card-hover: rgba(255,255,255,0.085);
+            --bg-input: rgba(255,255,255,0.045);
+            --border: rgba(255,255,255,0.10);
+            --border-light: rgba(255,255,255,0.18);
             --text-primary: #f0f0f0;
             --text-secondary: #999999;
             --text-muted: #666666;
@@ -24,21 +24,32 @@
             --green: #7ecf8e;
             --blue: #7ba4db;
             --purple: #c9a0dc;
-            --radius: 12px;
-            --radius-sm: 8px;
-            --radius-xs: 6px;
-            --shadow: 0 2px 20px rgba(0,0,0,0.3);
+            --radius: 18px;
+            --radius-sm: 14px;
+            --radius-xs: 10px;
+            --shadow: 0 18px 44px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.04);
             --transition: 0.2s ease;
+            --font-pixel: 'Cascadia Mono', 'SFMono-Regular', Consolas, 'PingFang SC', monospace;
         }
 
         html { scroll-behavior: smooth; }
 
         body {
-            background: var(--bg-primary);
+            background:
+                radial-gradient(circle at 12% 18%, rgba(123,164,219,0.12), transparent 28%),
+                radial-gradient(circle at 88% 12%, rgba(201,160,220,0.10), transparent 26%),
+                linear-gradient(180deg, #121316 0%, var(--bg-primary) 46%, #0c0d10 100%);
+            background-size: 120% 120%, 110% 110%, 100% 100%;
+            animation: ambientGradient 14s ease-in-out infinite alternate;
             color: var(--text-primary);
-            font-family: -apple-system, 'SF Pro Display', 'PingFang SC', 'Helvetica Neue', Arial, sans-serif;
+            font-family: ui-rounded, 'SF Pro Rounded', 'PingFang SC', 'Microsoft YaHei UI', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
             overflow-x: hidden;
             min-height: 100vh;
+        }
+
+        @keyframes ambientGradient {
+            from { background-position: 0% 0%, 100% 0%, 0 0; }
+            to { background-position: 8% 6%, 92% 8%, 0 0; }
         }
 
         /* ===== ENTRY ANIMATIONS ===== */
@@ -135,9 +146,9 @@
             display: flex;
             align-items: center;
             padding: 0 32px;
-            background: rgba(17,17,17,0.88);
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
+            background: rgba(16,17,19,0.72);
+            backdrop-filter: blur(24px) saturate(140%);
+            -webkit-backdrop-filter: blur(24px) saturate(140%);
             border-bottom: 1px solid var(--border);
         }
 
@@ -160,7 +171,7 @@
             padding: 8px 16px;
             font-size: 13px;
             font-weight: 400;
-            letter-spacing: 0.5px;
+            letter-spacing: 0;
             color: var(--text-secondary);
             text-decoration: none;
             border-radius: var(--radius-xs);
@@ -696,14 +707,35 @@
 
         .post-image-placeholder {
             width: 100%;
-            height: 200px;
+            height: auto;
+            min-height: 0;
             background: var(--bg-input);
             border-radius: var(--radius-sm);
             margin-bottom: 12px;
             display: flex;
             align-items: center;
             justify-content: center;
-            border: 1px dashed var(--border);
+            border: 1px solid var(--border);
+            overflow: hidden;
+        }
+
+        .post-image-link,
+        .detail-image-link {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: zoom-in;
+        }
+
+        .post-image-placeholder img,
+        .detail-image-placeholder img {
+            display: block;
+            max-width: 100%;
+            max-height: 70vh;
+            width: auto;
+            height: auto;
+            object-fit: contain;
         }
 
         .post-image-placeholder span { font-size: 12px; color: var(--text-muted); }
@@ -1191,14 +1223,16 @@
 
         .detail-image-placeholder {
             width: 100%;
-            height: 320px;
+            height: auto;
+            min-height: 0;
             background: var(--bg-input);
             border-radius: var(--radius);
             margin-bottom: 24px;
             display: flex;
             align-items: center;
             justify-content: center;
-            border: 1px dashed var(--border);
+            border: 1px solid var(--border);
+            overflow: hidden;
         }
 
         .detail-image-placeholder[hidden] {
@@ -1619,6 +1653,29 @@
 
         .comment-text { font-size: 13px; color: var(--text-secondary); line-height: 1.7; }
 
+        .comment-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 8px;
+        }
+
+        .comment-action {
+            border: none;
+            background: rgba(255,255,255,0.035);
+            color: var(--text-muted);
+            font: inherit;
+            font-size: 12px;
+            cursor: pointer;
+            padding: 3px 9px;
+            border-radius: 999px;
+        }
+
+        .comment-action:hover,
+        .comment-action.liked {
+            background: rgba(255,255,255,0.075);
+            color: var(--text-secondary);
+        }
+
         .comment-input-wrap {
             display: flex;
             gap: 12px;
@@ -1724,6 +1781,17 @@
         }
 
         .create-option:hover { border-color: var(--text-muted); color: var(--text-primary); }
+        .create-option:disabled,
+        .create-option.is-disabled {
+            color: var(--text-muted);
+            opacity: 0.45;
+            cursor: not-allowed;
+        }
+        .create-option:disabled:hover,
+        .create-option.is-disabled:hover {
+            border-color: var(--border);
+            color: var(--text-muted);
+        }
         .create-option svg { width: 16px; height: 16px; }
 
         .create-upload-area {
@@ -1743,6 +1811,29 @@
         }
 
         .create-upload-area:hover { border-color: var(--text-muted); }
+        .create-upload-area.is-dragover {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px var(--accent-dim);
+        }
+        .create-upload-area.has-preview {
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+            border-style: solid;
+            justify-content: flex-end;
+            overflow: hidden;
+            padding: 14px;
+        }
+        .create-upload-area.has-preview svg { display: none; }
+        .create-upload-area.has-preview span {
+            color: var(--text-primary);
+            background: rgba(16,17,19,0.72);
+            border: 1px solid rgba(255,255,255,0.16);
+            border-radius: 999px;
+            padding: 6px 10px;
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+        }
         .create-upload-area svg { width: 32px; height: 32px; opacity: 0.3; }
         .create-upload-area span { font-size: 13px; color: var(--text-muted); }
 
@@ -2226,11 +2317,30 @@
             border-radius: 50%;
             background: var(--accent-dim);
             flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 34px;
+            background-size: cover;
+            background-position: center;
         }
 
         .profile-info { flex: 1; }
         .profile-name { font-size: 22px; font-weight: 600; margin-bottom: 4px; }
         .profile-bio { font-size: 13px; color: var(--text-muted); margin-bottom: 12px; }
+        .profile-avatar-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+        .profile-avatar-button, .profile-emoji-select {
+            height: 32px;
+            padding: 0 12px;
+            border: 1px solid var(--border);
+            border-radius: 999px;
+            background: rgba(255,255,255,0.04);
+            color: var(--text-secondary);
+            font: inherit;
+            font-size: 12px;
+        }
+        .profile-avatar-button { cursor: pointer; }
+        .profile-avatar-button:hover, .profile-emoji-select:hover { border-color: var(--text-muted); color: var(--text-primary); }
         .profile-stats-row { display: flex; gap: 24px; }
         .profile-stat-item { text-align: left; }
         .profile-stat-val { font-size: 18px; font-weight: 600; }
@@ -3228,8 +3338,10 @@
 
         /* Nav enhancement */
         .nav {
-            background: rgba(10,10,10,0.92) !important;
-            border-bottom: 1px solid rgba(255,255,255,0.07) !important;
+            background: rgba(16,17,19,0.76) !important;
+            border-bottom: 1px solid rgba(255,255,255,0.10) !important;
+            backdrop-filter: blur(24px) saturate(140%) !important;
+            -webkit-backdrop-filter: blur(24px) saturate(140%) !important;
         }
 
         /* Search box enhancement */
@@ -3241,6 +3353,38 @@
             background: rgba(255,255,255,0.06) !important;
             border-color: rgba(255,255,255,0.2) !important;
             box-shadow: 0 0 0 1px rgba(255,255,255,0.08) !important;
+        }
+
+        .feed-header h2,
+        .sidebar-card-title,
+        .lb-header h2,
+        .plaza-header h2,
+        .activity-header h2,
+        .comments-title,
+        .auth-title,
+        .profile-name,
+        .odds-title {
+            font-family: var(--font-pixel);
+            font-weight: 700;
+            letter-spacing: 0;
+            text-shadow: 1px 0 0 rgba(255,255,255,0.18);
+        }
+
+        .post-card,
+        .sidebar-card,
+        .lb-table,
+        .activity-featured,
+        .activity-card,
+        .activity-leaderboard,
+        .profile-wallet-card,
+        .auth-card,
+        .odds-module,
+        .post-market-shell,
+        .create-body-input,
+        .create-upload-area {
+            backdrop-filter: blur(18px) saturate(130%);
+            -webkit-backdrop-filter: blur(18px) saturate(130%);
+            box-shadow: var(--shadow);
         }
 
         /* Sidebar card subtle left accent */
@@ -3915,6 +4059,14 @@
             background: linear-gradient(135deg, #ffffff, #d6d6d6);
             border: 1px solid rgba(255,255,255,0.72);
         }
+        .motion-particle.is-impact {
+            animation-timing-function: cubic-bezier(0.28, 1.3, 0.42, 1);
+            box-shadow: 0 12px 28px rgba(0,0,0,0.26), 0 0 18px rgba(255,255,255,0.18);
+        }
+        .post-market-track.is-impacting,
+        .post-market-inline-track.is-impacting {
+            animation: marketTrackImpact 0.58s cubic-bezier(0.16, 1, 0.3, 1);
+        }
         .oute-rain-drop {
             position: fixed;
             left: var(--left, 50%);
@@ -3971,6 +4123,11 @@
             0% { transform: scale(1); }
             45% { transform: scale(1.05); }
             100% { transform: scale(1); }
+        }
+        @keyframes marketTrackImpact {
+            0% { transform: scale(1); box-shadow: 0 0 0 rgba(255,255,255,0); }
+            38% { transform: scale(1.035); box-shadow: 0 0 0 1px rgba(255,255,255,0.22), 0 0 34px rgba(255,255,255,0.14); }
+            100% { transform: scale(1); box-shadow: 0 0 0 rgba(255,255,255,0); }
         }
         @media (max-width: 720px) {
             .post-market-shell-head {
@@ -4049,9 +4206,9 @@
 <path d="M0 0 C2.97 0.99 5.94 1.98 9 3 C9.825 4.32 9.825 4.32 14 11 C13 18 13 18 5 34 C4.34 35.65 4.34 35.65 1 44 C-8.57 44 -18.14 44 -28 44 C-28.33 43.67 -28.66 43.34 -29 43 C-29 33.1 -29 23.2 -29 13 C-22.4 10.36 -15.8 7.72 -9 5 C-6.03 3.35 -3.06 1.7 0 0 Z " fill="#FFFFFF" transform="translate(175,347)"/>
 <path d="M0 0 C7 1 7 1 18 8 C20.805 8.825 20.805 8.825 35 13 C35 22.24 35 31.48 35 41 C34.34 41.66 33.68 42.32 33 43 C23.43 43 13.86 43 4 43 C2.68 38.05 1.36 33.1 0 28 C-6 17 -6 17 -9 13 C-7 6 -7 6 -2 1 C-1.34 0.67 -0.68 0.34 0 0 Z " fill="#FFFFFF" transform="translate(227,348)"/>
 </svg>
-            <a class="nav-link active" data-page="home" onclick="navigate('home')">首页</a>
-            <a class="nav-link nav-link-disabled" data-page="leaderboard" aria-disabled="true" tabindex="-1" title="暂不开放">排行榜</a>
-            <a class="nav-link nav-link-disabled" data-page="activity" aria-disabled="true" tabindex="-1" title="暂不开放">活动</a>
+            <a class="nav-link active" data-page="home" href="#/home" onclick="navigate('home')">首页</a>
+            <a class="nav-link" data-page="leaderboard" href="#/leaderboard" onclick="navigate('leaderboard')">排行榜</a>
+            <a class="nav-link" data-page="activity" href="#/activity" onclick="navigate('activity')">活动</a>
     </div>
 
     <div class="nav-center">
@@ -4491,14 +4648,14 @@
 
             <div class="create-toolbar">
                 <div class="create-options">
-                    <button class="create-option">
+                    <button class="create-option" type="button" disabled>
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
                         添加标签
                     </button>
-                    <label class="create-option">
+                    <label class="create-option is-disabled" aria-disabled="true">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                         匿名发布
-                        <input type="checkbox" style="display:none">
+                        <input type="checkbox" style="display:none" disabled>
                     </label>
                 </div>
                 <button class="btn-publish" id="publishButton">发布帖子</button>
@@ -4871,10 +5028,23 @@
     <div class="page" id="page-profile">
         <div class="profile-layout">
             <div class="profile-header">
-                <div class="profile-avatar"></div>
+                <div class="profile-avatar" id="profileAvatar"></div>
                 <div class="profile-info">
                     <div class="profile-name">赛博浪客</div>
                     <div class="profile-bio">Agent 整活专家 · 三个 Bot 都被我骂退过群的男人</div>
+                    <div class="profile-avatar-controls">
+                        <button class="profile-avatar-button" id="profileAvatarUploadButton" type="button">上传头像</button>
+                        <input id="profileAvatarInput" type="file" accept="image/*" style="display:none">
+                        <select class="profile-emoji-select" id="profileEmojiSelect" aria-label="选择动物 emoji 头像">
+                            <option value="emoji:🐱">🐱 猫</option>
+                            <option value="emoji:🐶">🐶 狗</option>
+                            <option value="emoji:🐼">🐼 熊猫</option>
+                            <option value="emoji:🦊">🦊 狐狸</option>
+                            <option value="emoji:🐵">🐵 猴子</option>
+                            <option value="emoji:🐸">🐸 青蛙</option>
+                        </select>
+                    </div>
+                    <div class="inline-status" id="profileAvatarStatus"></div>
                     <div class="profile-stats-row">
                         <div class="profile-stat-item"><div class="profile-stat-val">147</div><div class="profile-stat-label">发帖</div></div>
                         <div class="profile-stat-item"><div class="profile-stat-val">2,847</div><div class="profile-stat-label">积分</div></div>
@@ -5150,7 +5320,7 @@
         animate();
     })();
 
-    const DISABLED_NAV_PAGES = new Set(["leaderboard", "activity"]);
+    const DISABLED_NAV_PAGES = new Set([]);
 
     // SPA Router
     function navigate(page) {

@@ -6,12 +6,12 @@ import {
   normalizeFeatureFlags,
 } from "./app-feature-flags.mjs";
 
-test("defaults leaderboard and activity to disabled", () => {
+test("defaults leaderboard and activity to enabled", () => {
   assert.deepEqual(DEFAULT_FEATURE_FLAGS, {
-    leaderboard: false,
-    activity: false,
+    leaderboard: true,
+    activity: true,
   });
-  assert.deepEqual([...getDisabledNavPages(DEFAULT_FEATURE_FLAGS)].sort(), ["activity", "leaderboard"]);
+  assert.deepEqual([...getDisabledNavPages(DEFAULT_FEATURE_FLAGS)], []);
 });
 
 test("normalizes backend feature flag rows into frontend booleans", () => {

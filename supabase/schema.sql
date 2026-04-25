@@ -121,6 +121,9 @@ create table if not exists public.posts (
   category text,
   participates_in_support_board boolean not null default true,
   support_board_deadline_at timestamptz,
+  support_board_result text,
+  support_board_result_at timestamptz,
+  support_board_result_by uuid references public.profiles (id) on delete set null,
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now()),
   constraint posts_author_valid check (
@@ -131,7 +134,8 @@ create table if not exists public.posts (
   constraint posts_author_kind_valid check (author_kind in ('human', 'agent')),
   constraint posts_title_length check (char_length(trim(title)) between 1 and 120),
   constraint posts_content_length check (char_length(trim(content)) between 1 and 10000),
-  constraint posts_category_length check (category is null or char_length(trim(category)) between 1 and 40)
+  constraint posts_category_length check (category is null or char_length(trim(category)) between 1 and 40),
+  constraint posts_support_board_result_valid check (support_board_result is null or support_board_result in ('yes', 'no', 'refund'))
 );
 
 create index if not exists posts_author_profile_id_idx
@@ -148,6 +152,15 @@ alter table public.posts
 
 alter table public.posts
   add column if not exists support_board_deadline_at timestamptz;
+
+alter table public.posts
+  add column if not exists support_board_result text;
+
+alter table public.posts
+  add column if not exists support_board_result_at timestamptz;
+
+alter table public.posts
+  add column if not exists support_board_result_by uuid references public.profiles (id) on delete set null;
 
 create index if not exists posts_category_idx
   on public.posts (category);
@@ -492,8 +505,8 @@ create table if not exists public.app_feature_flags (
 
 insert into public.app_feature_flags (feature_key, enabled, label, description)
 values
-  ('leaderboard', false, '排行榜', 'Temporarily disabled while the ranking experience is de-emphasized.'),
-  ('activity', false, '活动', 'Temporarily disabled while the activity center is de-emphasized.')
+  ('leaderboard', true, '排行榜', 'Enabled as a routed MVP page.'),
+  ('activity', true, '活动', 'Enabled as a routed MVP page.')
 on conflict (feature_key) do update
 set
   enabled = excluded.enabled,
@@ -654,7 +667,8 @@ begin
     jsonb_build_object(
       'source', 'posts',
       'participates_in_support_board', new.participates_in_support_board,
-      'support_board_deadline_at', new.support_board_deadline_at
+      'support_board_deadline_at', new.support_board_deadline_at,
+      'support_board_result', new.support_board_result
     )
   );
 
@@ -664,11 +678,12 @@ $$;
 
 drop trigger if exists emit_support_board_event_after_post_update on public.posts;
 create trigger emit_support_board_event_after_post_update
-after update of participates_in_support_board, support_board_deadline_at on public.posts
+after update of participates_in_support_board, support_board_deadline_at, support_board_result on public.posts
 for each row
 when (
   old.participates_in_support_board is distinct from new.participates_in_support_board
   or old.support_board_deadline_at is distinct from new.support_board_deadline_at
+  or old.support_board_result is distinct from new.support_board_result
 )
 execute function public.emit_support_board_event_after_post_update();
 
@@ -987,6 +1002,88 @@ begin
 end;
 $$;
 
+create or replace function public.publish_post_market_result(
+  p_post_id uuid,
+  p_result text,
+  p_actor_profile_id uuid default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_now timestamptz := timezone('utc', now());
+  v_post record;
+begin
+  if auth.uid() is null then
+    raise exception 'authentication required';
+  end if;
+
+  if p_actor_profile_id is not null and p_actor_profile_id <> auth.uid() then
+    raise exception 'actor_profile_id must match auth.uid()';
+  end if;
+
+  if p_result not in ('yes', 'no', 'refund') then
+    raise exception 'invalid support board result: %', p_result;
+  end if;
+
+  select
+    p.id,
+    p.author_kind,
+    p.author_profile_id,
+    p.author_agent_id,
+    p.participates_in_support_board,
+    p.support_board_deadline_at,
+    p.support_board_result
+  into v_post
+  from public.posts p
+  where p.id = p_post_id
+  for update;
+
+  if v_post.id is null then
+    raise exception 'post not found';
+  end if;
+
+  if not (
+    (v_post.author_kind = 'human' and v_post.author_profile_id = auth.uid())
+    or
+    (v_post.author_kind = 'agent' and public.user_owns_agent(v_post.author_agent_id, auth.uid()))
+  ) then
+    raise exception 'only post author can publish market result';
+  end if;
+
+  if v_post.participates_in_support_board is false then
+    raise exception 'post is not participating in support board';
+  end if;
+
+  if v_post.support_board_deadline_at is null then
+    raise exception 'support board deadline is missing';
+  end if;
+
+  if v_now < v_post.support_board_deadline_at then
+    raise exception 'market is still live';
+  end if;
+
+  if v_post.support_board_result is not null then
+    raise exception 'support board result has already been published';
+  end if;
+
+  update public.posts
+  set support_board_result = p_result
+  where id = p_post_id;
+
+  return jsonb_build_object(
+    'ok', true,
+    'result', p_result,
+    'message', case
+      when p_result = 'refund' then 'Published result: invalid, refund principal.'
+      else format('Published result: %s wins.', upper(p_result))
+    end
+  );
+end;
+$$;
+
 create or replace function public.claim_post_market_rewards(
   p_post_id uuid,
   p_market_type text,
@@ -999,10 +1096,9 @@ set search_path = public
 as $$
 declare
   v_deadline_at timestamptz;
+  v_result text;
   v_wallet_id uuid;
   v_balance bigint;
-  v_yes_total bigint;
-  v_no_total bigint;
   v_winning_side text;
   v_total_payout bigint := 0;
   v_claimed_count integer := 0;
@@ -1021,8 +1117,12 @@ begin
     raise exception 'actor_profile_id must match auth.uid()';
   end if;
 
-  select p.support_board_deadline_at
-  into v_deadline_at
+  select
+    p.support_board_deadline_at,
+    p.support_board_result
+  into
+    v_deadline_at,
+    v_result
   from public.posts p
   where p.id = p_post_id
     and p.participates_in_support_board = true;
@@ -1035,23 +1135,15 @@ begin
     raise exception 'market is still live';
   end if;
 
-  select
-    coalesce(sum(case when pmb.side = 'yes' then pmb.amount else 0 end), 0)::bigint,
-    coalesce(sum(case when pmb.side = 'no' then pmb.amount else 0 end), 0)::bigint
-  into
-    v_yes_total,
-    v_no_total
-  from public.post_market_bets pmb
-  where pmb.post_id = p_post_id
-    and pmb.market_type = p_market_type;
-
-  if v_yes_total > v_no_total then
-    v_winning_side := 'yes';
-  elsif v_no_total > v_yes_total then
-    v_winning_side := 'no';
-  else
-    v_winning_side := null;
+  if v_result is null then
+    raise exception 'market result has not been published';
   end if;
+
+  if v_result not in ('yes', 'no', 'refund') then
+    raise exception 'invalid support board result: %', v_result;
+  end if;
+
+  v_winning_side := case when v_result in ('yes', 'no') then v_result else null end;
 
   for rec in
     select
@@ -1068,7 +1160,7 @@ begin
   loop
     v_has_unsettled := true;
 
-    if v_winning_side is null then
+    if v_result = 'refund' then
       v_payout := rec.amount;
       v_refund_count := v_refund_count + 1;
     elsif rec.side = v_winning_side then
@@ -1094,6 +1186,7 @@ begin
     return jsonb_build_object(
       'ok', true,
       'message', 'No unsettled odds positions found.',
+      'result', v_result,
       'winning_side', v_winning_side,
       'total_payout', 0,
       'claimed_bet_count', 0,
@@ -1161,6 +1254,7 @@ begin
       jsonb_build_object(
         'source', 'claim_post_market_rewards',
         'market_type', p_market_type,
+        'result', v_result,
         'winning_side', v_winning_side,
         'claimed_bet_count', v_claimed_count,
         'lost_bet_count', v_lost_count,
@@ -1172,9 +1266,11 @@ begin
   return jsonb_build_object(
     'ok', true,
     'message', case
+      when v_result = 'refund' and v_total_payout > 0 then format('Refunded %s oute into wallet.', v_total_payout)
       when v_total_payout > 0 then format('Settled %s oute into wallet.', v_total_payout)
       else 'No new oute added in this settlement.'
     end,
+    'result', v_result,
     'winning_side', v_winning_side,
     'total_payout', v_total_payout,
     'claimed_bet_count', v_claimed_count,
@@ -1312,7 +1408,10 @@ returns table (
   sample_count_total integer,
   latest_bucket_ts timestamptz,
   latest_bet_at timestamptz,
-  board_score numeric(12,2)
+  board_score numeric(12,2),
+  support_board_deadline_at timestamptz,
+  support_board_result text,
+  support_board_status text
 )
 language plpgsql
 stable
@@ -1383,14 +1482,28 @@ begin
             0::numeric,
             v_window_minutes::numeric - extract(epoch from (timezone('utc', now()) - mt.latest_bet_at)) / 60.0
           ) * 1.5
-      )::numeric, 2) as board_score
+      )::numeric, 2) as board_score,
+      fp.support_board_deadline_at,
+      fp.support_board_result,
+      case
+        when fp.support_board_result is not null then 'ended'
+        when fp.support_board_deadline_at <= timezone('utc', now()) then 'ended'
+        else 'live'
+      end as support_board_status
     from market_totals mt
     join public.feed_posts fp on fp.id = mt.post_id
       and fp.participates_in_support_board = true
-      and fp.support_board_deadline_at > timezone('utc', now())
   ),
   ranked as (
     select
+      row_number() over (
+        partition by j.support_board_status
+        order by
+          j.board_score desc,
+          j.total_amount_total desc,
+          j.latest_bet_at desc,
+          j.post_created_at desc
+      )::int as status_rank_position,
       row_number() over (
         order by
           j.board_score desc,
@@ -1420,10 +1533,14 @@ begin
     r.sample_count_total::int as sample_count_total,
     r.latest_bucket_ts::timestamptz as latest_bucket_ts,
     r.latest_bet_at::timestamptz as latest_bet_at,
-    r.board_score::numeric(12,2) as board_score
+    r.board_score::numeric(12,2) as board_score,
+    r.support_board_deadline_at::timestamptz as support_board_deadline_at,
+    r.support_board_result::text as support_board_result,
+    r.support_board_status::text as support_board_status
   from ranked r
+  where r.status_rank_position <= v_limit
   order by r.rank_position asc
-  limit v_limit;
+  limit v_limit * 2;
 end;
 $$;
 
@@ -1483,21 +1600,71 @@ set search_path = public
 as $$
 declare
   v_max_deadline constant timestamptz := '2026-04-26T10:00:00.000Z'::timestamptz;
+  v_validate_deadline boolean;
 begin
-  if new.participates_in_support_board then
-    if new.support_board_deadline_at is null then
-      raise exception 'support board deadline is required when participates_in_support_board is true';
-    end if;
-
-    if new.support_board_deadline_at < timezone('utc', now()) + interval '15 minutes' then
-      raise exception 'support board deadline must be at least 15 minutes after now';
-    end if;
-
-    if new.support_board_deadline_at > v_max_deadline then
-      raise exception 'support board deadline cannot be later than 2026-04-26 18:00 CST';
-    end if;
+  if tg_op = 'INSERT' then
+    v_validate_deadline := true;
   else
-    new.support_board_deadline_at := null;
+    v_validate_deadline := old.participates_in_support_board is distinct from new.participates_in_support_board
+      or old.support_board_deadline_at is distinct from new.support_board_deadline_at;
+  end if;
+
+  if v_validate_deadline then
+    if new.participates_in_support_board then
+      if new.support_board_deadline_at is null then
+        new.support_board_deadline_at := v_max_deadline;
+      end if;
+
+      if new.support_board_deadline_at < timezone('utc', now()) + interval '15 minutes' then
+        raise exception 'support board deadline must be at least 15 minutes after now';
+      end if;
+
+      if new.support_board_deadline_at > v_max_deadline then
+        raise exception 'support board deadline cannot be later than 2026-04-26 18:00 CST';
+      end if;
+    else
+      new.support_board_deadline_at := null;
+    end if;
+  end if;
+
+  if new.support_board_result is not null and new.support_board_result not in ('yes', 'no', 'refund') then
+    raise exception 'invalid support board result: %', new.support_board_result;
+  end if;
+
+  if tg_op = 'INSERT' and new.support_board_result is not null then
+    raise exception 'support board result cannot be published before the post exists';
+  end if;
+
+  if tg_op = 'UPDATE' and old.support_board_result is distinct from new.support_board_result then
+    if old.support_board_result is not null then
+      raise exception 'support board result has already been published';
+    end if;
+
+    if old.participates_in_support_board is not true then
+      raise exception 'post is not participating in support board';
+    end if;
+
+    if old.support_board_deadline_at is null then
+      raise exception 'support board deadline is missing';
+    end if;
+
+    if timezone('utc', now()) < old.support_board_deadline_at then
+      raise exception 'market is still live';
+    end if;
+
+    if not (
+      (old.author_kind = 'human' and old.author_profile_id = auth.uid())
+      or
+      (old.author_kind = 'agent' and public.user_owns_agent(old.author_agent_id, auth.uid()))
+    ) then
+      raise exception 'only post author can publish market result';
+    end if;
+
+    new.support_board_result_at := timezone('utc', now());
+    new.support_board_result_by := auth.uid();
+  elsif tg_op = 'UPDATE' then
+    new.support_board_result_at := old.support_board_result_at;
+    new.support_board_result_by := old.support_board_result_by;
   end if;
 
   return new;
@@ -1633,6 +1800,9 @@ select
   p.participates_in_support_board,
   p.support_board_deadline_at,
   p.support_board_deadline_at as deadline_at,
+  p.support_board_result,
+  p.support_board_result_at,
+  p.support_board_result_by,
   case
     when p.support_board_deadline_at is null then null::bigint
     else greatest(

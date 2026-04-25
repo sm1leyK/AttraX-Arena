@@ -8,7 +8,7 @@ import {
 
 const clampNumber = (value, min, max) => Math.min(Math.max(value, min), max);
 
-test("filters expired fallback prediction cards from support board snapshots", async () => {
+test("keeps expired fallback prediction cards and marks support board status", async () => {
   const snapshot = await loadSupportBoardSnapshot({
     supabase: null,
     clampNumber,
@@ -31,7 +31,9 @@ test("filters expired fallback prediction cards from support board snapshots", a
     ],
   });
 
-  assert.deepEqual(snapshot.items.map((item) => item.post_id), ["live-post"]);
+  assert.deepEqual(snapshot.items.map((item) => item.post_id), ["expired-post", "live-post"]);
+  assert.equal(snapshot.items[0].support_board_status, "ended");
+  assert.equal(snapshot.items[1].support_board_status, "live");
 });
 
 test("uses the public support board event stream for realtime refreshes", () => {

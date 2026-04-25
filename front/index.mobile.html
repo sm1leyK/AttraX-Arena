@@ -636,14 +636,35 @@
 
         .post-image-placeholder {
             width: 100%;
-            height: 200px;
+            height: auto;
+            min-height: 0;
             background: var(--bg-input);
             border-radius: var(--radius-sm);
             margin-bottom: 12px;
             display: flex;
             align-items: center;
             justify-content: center;
-            border: 1px dashed var(--border);
+            border: 1px solid var(--border);
+            overflow: hidden;
+        }
+
+        .post-image-link,
+        .detail-image-link {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: zoom-in;
+        }
+
+        .post-image-placeholder img,
+        .detail-image-placeholder img {
+            display: block;
+            max-width: 100%;
+            max-height: 70vh;
+            width: auto;
+            height: auto;
+            object-fit: contain;
         }
 
         .post-image-placeholder span { font-size: 12px; color: var(--text-muted); }
@@ -1131,14 +1152,16 @@
 
         .detail-image-placeholder {
             width: 100%;
-            height: 320px;
+            height: auto;
+            min-height: 0;
             background: var(--bg-input);
             border-radius: var(--radius);
             margin-bottom: 24px;
             display: flex;
             align-items: center;
             justify-content: center;
-            border: 1px dashed var(--border);
+            border: 1px solid var(--border);
+            overflow: hidden;
         }
 
         .detail-image-placeholder span { font-size: 14px; color: var(--text-muted); }
@@ -1591,6 +1614,17 @@
         }
 
         .create-option:hover { border-color: var(--text-muted); color: var(--text-primary); }
+        .create-option:disabled,
+        .create-option.is-disabled {
+            color: var(--text-muted);
+            opacity: 0.45;
+            cursor: not-allowed;
+        }
+        .create-option:disabled:hover,
+        .create-option.is-disabled:hover {
+            border-color: var(--border);
+            color: var(--text-muted);
+        }
         .create-option svg { width: 16px; height: 16px; }
 
         .create-upload-area {
@@ -1610,6 +1644,29 @@
         }
 
         .create-upload-area:hover { border-color: var(--text-muted); }
+        .create-upload-area.is-dragover {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px var(--accent-dim);
+        }
+        .create-upload-area.has-preview {
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+            border-style: solid;
+            justify-content: flex-end;
+            overflow: hidden;
+            padding: 14px;
+        }
+        .create-upload-area.has-preview svg { display: none; }
+        .create-upload-area.has-preview span {
+            color: var(--text-primary);
+            background: rgba(16,17,19,0.72);
+            border: 1px solid rgba(255,255,255,0.16);
+            border-radius: 999px;
+            padding: 6px 10px;
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+        }
         .create-upload-area svg { width: 32px; height: 32px; opacity: 0.3; }
         .create-upload-area span { font-size: 13px; color: var(--text-muted); }
 
@@ -4254,14 +4311,14 @@
 
             <div class="create-toolbar">
                 <div class="create-options">
-                    <button class="create-option">
+                    <button class="create-option" type="button" disabled>
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
                         添加标签
                     </button>
-                    <label class="create-option">
+                    <label class="create-option is-disabled" aria-disabled="true">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                         匿名发布
-                        <input type="checkbox" style="display:none">
+                        <input type="checkbox" style="display:none" disabled>
                     </label>
                 </div>
                 <button class="btn-publish" id="publishButton">发布帖子</button>

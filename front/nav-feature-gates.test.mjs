@@ -9,17 +9,18 @@ const html = readFileSync(join(currentDir, "index.html"), "utf8");
 const appSource = readFileSync(join(currentDir, "app.mjs"), "utf8");
 
 for (const page of ["leaderboard", "activity"]) {
-  test(`disables the ${page} top navigation entry`, () => {
+  test(`exposes the ${page} top navigation entry`, () => {
     const navLink = html.match(new RegExp(`<a[^>]+data-page="${page}"[^>]*>`))?.[0] ?? "";
 
-    assert.match(navLink, /\bnav-link-disabled\b/);
-    assert.match(navLink, /aria-disabled="true"/);
-    assert.doesNotMatch(navLink, /onclick="navigate/);
+    assert.doesNotMatch(navLink, /\bnav-link-disabled\b/);
+    assert.doesNotMatch(navLink, /aria-disabled="true"/);
+    assert.match(navLink, new RegExp(`href="#/${page}"`));
+    assert.match(navLink, new RegExp(`onclick="navigate\\('${page}'\\)"`));
   });
 }
 
-test("blocks disabled leaderboard and activity routes in static and module navigation", () => {
-  assert.match(html, /DISABLED_NAV_PAGES\s*=\s*new Set\(\["leaderboard", "activity"\]\)/);
+test("keeps page routing wired through static and module navigation", () => {
+  assert.match(html, /DISABLED_NAV_PAGES\s*=\s*new Set\(\[\]\)/);
   assert.match(appSource, /loadAppFeatureFlags\(\)/);
   assert.match(appSource, /applyFeatureGates\(\)/);
   assert.match(html, /DISABLED_NAV_PAGES\.has\(page\)/);

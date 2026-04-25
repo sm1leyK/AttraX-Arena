@@ -16,6 +16,7 @@ export async function loadSupportBoardSnapshot({
   now = new Date(),
 }) {
   const fallbackItems = buildFallbackSupportBoardItems(predictionCards, clampNumber, now);
+  const nowMs = getTimestampMs(now);
 
   if (!supabase) {
     return {
@@ -34,7 +35,7 @@ export async function loadSupportBoardSnapshot({
 
   const liveItems = !summaryResult.error
     ? (summaryResult.data ?? [])
-      .map((row, index) => normalizeSupportBoardSummaryRow(row, index, clampNumber))
+      .map((row, index) => normalizeSupportBoardSummaryRow(row, index, clampNumber, nowMs))
       .filter(Boolean)
     : [];
 
@@ -123,7 +124,7 @@ export async function loadSupportBoardPostTrend({
   };
 }
 
-function normalizeSupportBoardSummaryRow(row, index, clampNumber) {
+function normalizeSupportBoardSummaryRow(row, index, clampNumber, nowMs) {
   if (!row?.post_id) {
     return null;
   }
@@ -151,6 +152,9 @@ function normalizeSupportBoardSummaryRow(row, index, clampNumber) {
     latest_bet_at: row.latest_bet_at || null,
     board_score: Number(row.board_score ?? yesRate),
     headline: row.headline || "",
+    support_board_deadline_at: row.support_board_deadline_at || row.deadline_at || null,
+    support_board_result: row.support_board_result || null,
+    support_board_status: getSupportBoardItemStatus(row, nowMs),
   };
 }
 
@@ -208,8 +212,6 @@ function buildFallbackSupportBoardItems(predictionCards, clampNumber, now = new 
   const nowMs = getTimestampMs(now);
 
   return (predictionCards ?? [])
-    .filter((item) => isSupportBoardFallbackItemLive(item, nowMs))
-    .slice(0, SUPPORT_BOARD_DEFAULTS.limit)
     .map((item, index) => ({
       rank_position: index + 1,
       post_id: item.post_id,
@@ -232,17 +234,27 @@ function buildFallbackSupportBoardItems(predictionCards, clampNumber, now = new 
       board_score: Number(item.probability ?? 50),
       headline: item.headline || "",
       support_board_deadline_at: item.support_board_deadline_at || item.deadline_at || null,
+      support_board_result: item.support_board_result || null,
+      support_board_status: getSupportBoardItemStatus(item, nowMs),
     }))
     .filter((item) => item.post_id);
 }
 
-function isSupportBoardFallbackItemLive(item, nowMs) {
-  const deadlineMs = getTimestampMs(item?.support_board_deadline_at ?? item?.deadline_at);
-  if (deadlineMs == null || nowMs == null) {
-    return true;
+function getSupportBoardItemStatus(item, nowMs) {
+  if (item?.support_board_status === "ended" || item?.support_board_status === "live") {
+    return item.support_board_status;
   }
 
-  return deadlineMs > nowMs;
+  if (item?.support_board_result) {
+    return "ended";
+  }
+
+  const deadlineMs = getTimestampMs(item?.support_board_deadline_at ?? item?.deadline_at);
+  if (deadlineMs == null || nowMs == null) {
+    return "live";
+  }
+
+  return deadlineMs > nowMs ? "live" : "ended";
 }
 
 function getTimestampMs(value) {
@@ -272,7 +284,7 @@ function mergeSupportBoardItems(primaryItems, fallbackItems) {
     merged.push(item);
   });
 
-  return merged.slice(0, SUPPORT_BOARD_DEFAULTS.limit);
+  return merged;
 }
 
 function isSameBoardItem(left, right) {
@@ -343,6 +355,9 @@ function buildSupportBoardTrendItem({
     latest_bet_at: post?.latest_bet_at || null,
     board_score: Number(post?.board_score ?? yesRate),
     headline: post?.headline || "",
+    support_board_deadline_at: post?.support_board_deadline_at || post?.deadline_at || null,
+    support_board_result: post?.support_board_result || null,
+    support_board_status: post?.support_board_status || "live",
   };
 }
 

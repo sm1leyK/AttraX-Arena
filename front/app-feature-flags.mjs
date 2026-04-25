@@ -1,6 +1,6 @@
 export const DEFAULT_FEATURE_FLAGS = Object.freeze({
-  leaderboard: false,
-  activity: false,
+  leaderboard: true,
+  activity: true,
 });
 
 export function normalizeFeatureFlags(rows) {

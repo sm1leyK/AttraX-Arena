@@ -19,7 +19,9 @@ export function renderPostImage(imageUrl) {
     return "";
   }
 
-  return `<div class="post-image-placeholder" style="padding:0;overflow:hidden"><img src="${escapeAttribute(normalizedImageUrl)}" alt="post" style="width:100%;display:block;max-height:220px;object-fit:cover"></div>`;
+  const escapedImageUrl = escapeAttribute(normalizedImageUrl);
+
+  return `<div class="post-image-placeholder"><a class="post-image-link" href="${escapedImageUrl}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" aria-label="Open post image"><img src="${escapedImageUrl}" alt="post"></a></div>`;
 }
 
 export function renderDetailImage(imageUrl, title) {
@@ -29,7 +31,9 @@ export function renderDetailImage(imageUrl, title) {
     return "";
   }
 
-  return `<img src="${escapeAttribute(normalizedImageUrl)}" alt="${escapeAttribute(title)}" style="width:100%;display:block;border-radius:16px;max-height:320px;object-fit:cover">`;
+  const escapedImageUrl = escapeAttribute(normalizedImageUrl);
+
+  return `<a class="detail-image-link" href="${escapedImageUrl}" target="_blank" rel="noopener noreferrer" aria-label="Open post image"><img src="${escapedImageUrl}" alt="${escapeAttribute(title)}"></a>`;
 }
 
 function escapeHtml(value) {

@@ -89,6 +89,9 @@ const FEATURE_GATES = Object.freeze({
   postMarketWrites: true,
 });
 
+const DEFAULT_PROFILE_AVATAR = "emoji:🐱";
+const CREATE_UPLOAD_LABEL_DEFAULT = "点击或拖拽上传图片";
+const CREATE_UPLOAD_LABEL_PREVIEW = "点击或拖拽更换图片";
 const LEADERBOARD_REFRESH_MS = 12000;
 const LENS_AGENT_FEED_REFRESH_DELAY_MS = 700;
 const LENS_AGENT_FEED_REFRESH_STEP_MS = 350;
@@ -157,6 +160,7 @@ const state = {
   leaderboardTime: "今日",
   isLogin: true,
   createImageFile: null,
+  createImagePreviewUrl: null,
   pendingDetailLikeBurst: false,
   postBetFeatureStatus: FEATURE_GATES.postMarketWrites ? "unknown" : "unsupported",
   lensAgentClient: null,
@@ -186,6 +190,7 @@ const state = {
 };
 
 state.supportBoardFilter = "all";
+state.supportBoardStatusFilter = "live";
 state.expandedSupportPostId = null;
 
 function supportsSupportBoard(post) {
@@ -206,6 +211,18 @@ function isCurrentUserPostAuthor(post) {
   }
 
   return post.author_kind === "agent" && post.author_agent_owner_id === state.user.id;
+}
+
+function getPostMarketResult(post) {
+  const result = String(post?.support_board_result || "").toLowerCase();
+  return ["yes", "no", "refund"].includes(result) ? result : "";
+}
+
+function getPostMarketResultLabel(result) {
+  if (result === "yes") return "YES wins";
+  if (result === "no") return "NO wins";
+  if (result === "refund") return "Invalid, refund principal";
+  return "";
 }
 
 function getSupportParticipationLabel(post) {
@@ -238,13 +255,12 @@ function syncCreateSupportControls({ preserveValue = true } = {}) {
     return;
   }
 
-  const { minDate, maxDate } = getSupportDeadlineBounds();
+  const { minDate } = getSupportDeadlineBounds();
   deadlineInput.min = formatForDateTimeLocal(minDate);
   deadlineInput.max = SUPPORT_BOARD_MAX_DEADLINE_LOCAL;
 
   if (!preserveValue || !deadlineInput.value) {
-    const defaultDate = new Date(Math.min(maxDate.getTime(), minDate.getTime() + 60 * 60000));
-    deadlineInput.value = formatForDateTimeLocal(defaultDate);
+    deadlineInput.value = SUPPORT_BOARD_MAX_DEADLINE_LOCAL;
   }
 
   const validation = buildSupportDeadlineValidation(parseLocalDateTimeInput(deadlineInput.value));
@@ -462,6 +478,11 @@ const els = {
   authSwitch: document.getElementById("auth-switch"),
   createStatus: byIdOrSelector("create-status", "#page-create .inline-status"),
   commentStatus: byIdOrSelector("comment-status", "#page-detail .inline-status"),
+  profileAvatar: byIdOrSelector("profileAvatar", "#page-profile .profile-avatar"),
+  profileAvatarInput: byIdOrSelector("profileAvatarInput", "#page-profile input[type=\"file\"]"),
+  profileAvatarUploadButton: byIdOrSelector("profileAvatarUploadButton"),
+  profileEmojiSelect: byIdOrSelector("profileEmojiSelect"),
+  profileAvatarStatus: byIdOrSelector("profileAvatarStatus"),
   profileName: document.querySelector("#page-profile .profile-name"),
   profileBio: document.querySelector("#page-profile .profile-bio"),
   profilePostCount: document.querySelectorAll("#page-profile .profile-stat-val")[0] ?? null,
@@ -509,9 +530,17 @@ const leaderboardMotion = createLeaderboardMotion({
 });
 const configReady = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY && /^https?:\/\//.test(SUPABASE_URL));
 const BOOKMARK_STORAGE_KEY = "attrax_bookmarked_posts_v1";
+const COMMENT_INTERACTIONS_STORAGE_KEY = "attrax_comment_interactions_v1";
 
 function buildPostShareUrl(postId) {
   return buildPostRouteUrl(window.location.href, postId);
+}
+
+function buildCommentShareUrl(commentId) {
+  const postId = state.currentDetailPost?.id || state.detailPostId;
+  const url = new URL(buildPostShareUrl(postId));
+  url.hash = `${buildPostHash(postId)}#comment-${encodeURIComponent(commentId)}`;
+  return url.toString();
 }
 
 const ensureMotionLayer = () => {
@@ -678,13 +707,16 @@ async function refreshSession() {
 
   state.session = session;
   state.user = session?.user ?? null;
-  await loadProfile();
-  await syncCookieConsentWithBackend();
-  await ensureWalletExperience({ reason: "session-refresh", allowDailyReward: true });
   updateAuthUi();
   renderProfileWallet();
-  await renderProfilePosts();
   redirectAuthenticatedAuthRoute();
+
+  await loadProfile();
+  updateAuthUi();
+  await syncCookieConsentWithBackend();
+  await ensureWalletExperience({ reason: "session-refresh", allowDailyReward: true });
+  renderProfileWallet();
+  await renderProfilePosts();
 }
 
 async function loadProfile() {
@@ -1501,9 +1533,14 @@ function renderFeedPostMarket(post) {
   });
   const marketLabel = marketType === "flamewar" ? "引战站队" : "爆帖站队";
   const marketDeadline = resolveMarketDeadline({ post, marketType });
+  const marketResult = getPostMarketResult(post);
+  const countdownSnapshot = getMarketCountdownSnapshot(marketDeadline);
   const lockedSide = getMarketPositionSide(getUserPostMarketBets(post.id), marketType);
   const ownPostLocked = isCurrentUserPostAuthor(post);
   const sideStatusText = ownPostLocked ? getOwnPostMarketLockMessage() : getMarketSideStatusText(lockedSide);
+  const resultStatusText = countdownSnapshot.expired
+    ? (marketResult ? `Result: ${getPostMarketResultLabel(marketResult)}` : "Waiting for author result.")
+    : sideStatusText;
   const yesBlocked = ownPostLocked || isMarketSideBlocked(lockedSide, "yes");
   const noBlocked = ownPostLocked || isMarketSideBlocked(lockedSide, "no");
   const yesButtonText = lockedSide === "yes" ? "追加 YES · 50 oute" : "站队 YES · 50 oute";
@@ -1527,20 +1564,31 @@ function renderFeedPostMarket(post) {
         <button class="post-market-inline-btn primary" type="button" data-action="feed-post-side" data-post-id="${post.id}" data-market-type="${marketType}" data-side="yes" data-stake="50"${yesDisabledAttr}>${yesButtonText}</button>
         <button class="post-market-inline-btn" type="button" data-action="feed-post-side" data-post-id="${post.id}" data-market-type="${marketType}" data-side="no" data-stake="50"${noDisabledAttr}>${noButtonText}</button>
       </div>
-      <div class="post-market-inline-status" id="feedPostStatus-${post.id}">${escapeHtml(sideStatusText)}</div>
+      <div class="post-market-inline-status" id="feedPostStatus-${post.id}">${escapeHtml(resultStatusText)}</div>
     </div>
   `;
 }
 
 async function loadHomepageSupportBoardData() {
+  const supportPostById = new Map(
+    state.posts.map((post) => [post.id, post]),
+  );
   const snapshot = await loadSupportBoardSnapshot({
     supabase: state.supabase,
-    predictionCards: state.predictionCards.filter((item) => {
+    predictionCards: state.predictionCards.map((item) => {
+      const matchedPost = supportPostById.get(item?.post_id);
+      return {
+        ...item,
+        participates_in_support_board: item.participates_in_support_board ?? matchedPost?.participates_in_support_board,
+        support_board_deadline_at: item.support_board_deadline_at ?? matchedPost?.support_board_deadline_at ?? matchedPost?.deadline_at ?? null,
+        support_board_result: item.support_board_result ?? matchedPost?.support_board_result ?? null,
+      };
+    }).filter((item) => {
       if (typeof item?.participates_in_support_board === "boolean") {
         return item.participates_in_support_board;
       }
 
-      const matchedPost = state.posts.find((post) => post.id === item?.post_id);
+      const matchedPost = supportPostById.get(item?.post_id);
       return supportsSupportBoard(matchedPost);
     }),
     clampNumber,
@@ -1926,8 +1974,10 @@ function initGlobals() {
   window.openDetailById = openDetailById;
   window.doLogout = doLogout;
   window.setLiveSupportBoardFilter = setLiveSupportBoardFilter;
+  window.setLiveSupportBoardStatusFilter = setLiveSupportBoardStatusFilter;
   window.toggleLiveSupportBoardItem = toggleLiveSupportBoardItem;
   window.setSupportBoardFilter = setLiveSupportBoardFilter;
+  window.setSupportBoardStatusFilter = setLiveSupportBoardStatusFilter;
   window.toggleSupportBoardItem = toggleLiveSupportBoardItem;
   window.openCookieModal = openCookieModal;
   window.closeCookieModal = closeCookieModal;
@@ -1995,6 +2045,13 @@ function initStaticInteractions() {
     void submitComment();
   });
 
+  els.commentInput?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+      event.preventDefault();
+      void submitComment();
+    }
+  });
+
   els.publishButton?.addEventListener("click", () => {
     void submitPost();
   });
@@ -2008,10 +2065,56 @@ function initStaticInteractions() {
   });
 
   els.createImageInput?.addEventListener("change", () => {
-    state.createImageFile = els.createImageInput.files?.[0] ?? null;
-    els.createUploadLabel.textContent = state.createImageFile
-      ? `已选择：${state.createImageFile.name}`
-      : "点击或拖拽上传图片";
+    setCreateImagePreview(getCreateImageFile(els.createImageInput.files));
+  });
+
+  els.createUploadArea?.addEventListener("dragenter", (event) => {
+    event.preventDefault();
+    els.createUploadArea.classList.add("is-dragover");
+  });
+
+  els.createUploadArea?.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    els.createUploadArea.classList.add("is-dragover");
+  });
+
+  els.createUploadArea?.addEventListener("dragleave", (event) => {
+    if (!event.currentTarget.contains(event.relatedTarget)) {
+      els.createUploadArea.classList.remove("is-dragover");
+    }
+  });
+
+  els.createUploadArea?.addEventListener("drop", (event) => {
+    event.preventDefault();
+    els.createUploadArea.classList.remove("is-dragover");
+    const file = getCreateImageFile(event.dataTransfer?.files);
+
+    if (!file) {
+      setStatus(els.createStatus, "请拖入图片文件。", "error");
+      return;
+    }
+
+    setStatus(els.createStatus, "");
+    setCreateImagePreview(file);
+  });
+
+  els.profileAvatarUploadButton?.addEventListener("click", () => {
+    if (!state.user) {
+      navigate("auth");
+      return;
+    }
+    els.profileAvatarInput?.click();
+  });
+
+  els.profileAvatarInput?.addEventListener("change", () => {
+    const file = els.profileAvatarInput.files?.[0];
+    if (file) {
+      void uploadProfileAvatar(file);
+    }
+  });
+
+  els.profileEmojiSelect?.addEventListener("change", () => {
+    void updateProfileAvatar(els.profileEmojiSelect.value || DEFAULT_PROFILE_AVATAR);
   });
 
   els.createSupportToggle?.addEventListener("change", () => {
@@ -2437,6 +2540,9 @@ function spawnBurstParticles(target, options = {}) {
   const rect = target.getBoundingClientRect();
   const originX = rect.left + (rect.width / 2);
   const originY = rect.top + (rect.height / 2);
+  const targetRect = options.target?.getBoundingClientRect?.();
+  const targetX = targetRect ? targetRect.left + (targetRect.width / 2) : 0;
+  const targetY = targetRect ? targetRect.top + (targetRect.height / 2) : 0;
   const glyphs = options.glyphs ?? ["*"];
   const count = options.count ?? 6;
   const spreadX = options.spreadX ?? 90;
@@ -2445,6 +2551,8 @@ function spawnBurstParticles(target, options = {}) {
   const sizeMin = options.sizeMin ?? 12;
   const sizeMax = options.sizeMax ?? 17;
   const endScale = options.endScale ?? 0.86;
+  const durationMin = options.durationMin ?? 0.72;
+  const durationMax = options.durationMax ?? 1.04;
 
   for (let index = 0; index < count; index += 1) {
     const particle = document.createElement("span");
@@ -2453,16 +2561,41 @@ function spawnBurstParticles(target, options = {}) {
     particle.textContent = glyph;
     particle.style.left = `${originX}px`;
     particle.style.top = `${originY}px`;
-    particle.style.setProperty("--dx", `${randomBetween(-spreadX, spreadX)}px`);
-    particle.style.setProperty("--dy", `${randomBetween(minY, maxY)}px`);
+    particle.style.setProperty("--dx", `${targetRect ? targetX - originX + randomBetween(-spreadX, spreadX) : randomBetween(-spreadX, spreadX)}px`);
+    particle.style.setProperty("--dy", `${targetRect ? targetY - originY + randomBetween(minY, maxY) : randomBetween(minY, maxY)}px`);
     particle.style.setProperty("--rotate", `${randomBetween(-160, 160)}deg`);
     particle.style.setProperty("--delay", `${index * 28}ms`);
-    particle.style.setProperty("--duration", `${randomBetween(0.72, 1.04).toFixed(2)}s`);
+    particle.style.setProperty("--duration", `${randomBetween(durationMin, durationMax).toFixed(2)}s`);
     particle.style.setProperty("--size", `${randomBetween(sizeMin, sizeMax)}px`);
     particle.style.setProperty("--end-scale", String(endScale));
     motionLayer.appendChild(particle);
     particle.addEventListener("animationend", () => particle.remove(), { once: true });
   }
+}
+
+function playPostMarketOuteImpact(button) {
+  const market = button?.closest(".post-market-shell, .post-market-inline");
+  const side = button?.dataset?.side;
+  const track = market?.querySelector(".post-market-track, .post-market-inline-track");
+  const segment = side ? market?.querySelector(`.post-market-fill.${side}, .post-market-inline-fill.${side}`) : null;
+
+  pulseElement(button);
+  spawnBurstParticles(button, {
+    target: segment ?? track,
+    className: "is-coin is-impact",
+    glyphs: ["oute", "oute", "oute", "+50"],
+    count: 9,
+    spreadX: 18,
+    minY: -8,
+    maxY: 8,
+    sizeMin: 12,
+    sizeMax: 15,
+    endScale: 0.66,
+    durationMin: 0.48,
+    durationMax: 0.68,
+  });
+  window.setTimeout(() => pulseElement(track, "is-impacting"), 260);
+  triggerOuteRainBurst();
 }
 
 function prefersReducedMotion() {
@@ -2854,7 +2987,7 @@ function updateAuthUi() {
   const initial = name.slice(0, 1).toUpperCase();
 
   if (navAvatar) {
-    navAvatar.textContent = initial;
+    renderAvatarElement(navAvatar, state.profile?.avatar_url || DEFAULT_PROFILE_AVATAR, initial);
   }
 
   if (navLoginButton) {
@@ -3104,6 +3237,12 @@ function setLiveSupportBoardFilter(filterKey) {
   renderLiveSupportBoard();
 }
 
+function setLiveSupportBoardStatusFilter(filterKey) {
+  state.supportBoardStatusFilter = filterKey === "ended" ? "ended" : "live";
+  state.expandedSupportPostId = null;
+  renderLiveSupportBoard();
+}
+
 function toggleLiveSupportBoardItem(postId) {
   state.expandedSupportPostId = state.expandedSupportPostId === postId ? null : postId;
   renderLiveSupportBoard();
@@ -3120,6 +3259,7 @@ function renderLiveSupportBoard() {
     seriesByKey: state.supportBoardSeriesByKey,
     dataSource: state.supportBoardDataSource,
     supportBoardFilter: state.supportBoardFilter,
+    supportBoardStatusFilter: state.supportBoardStatusFilter,
     expandedSupportPostId: state.expandedSupportPostId,
     helpers: {
       defaults: SUPPORT_BOARD_DEFAULTS,
@@ -3360,6 +3500,27 @@ function persistBookmarkedPostIds() {
   window.localStorage.setItem(BOOKMARK_STORAGE_KEY, JSON.stringify(state.bookmarkedPostIds));
 }
 
+function loadCommentInteractions() {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(COMMENT_INTERACTIONS_STORAGE_KEY) || "{}");
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch (_error) {
+    return {};
+  }
+}
+
+function persistCommentInteractions(interactions) {
+  window.localStorage.setItem(COMMENT_INTERACTIONS_STORAGE_KEY, JSON.stringify(interactions));
+}
+
+function getCommentInteraction(commentId) {
+  const record = loadCommentInteractions()[commentId] || {};
+  return {
+    liked: Boolean(record.liked),
+    like_count: Math.max(0, Number(record.like_count || 0)),
+  };
+}
+
 function isPostBookmarked(postId) {
   return state.bookmarkedPostIds.includes(postId);
 }
@@ -3422,7 +3583,7 @@ function renderDetailActions() {
       ${heartFillIcon()}
       ${formatCompact(post.like_count)}
     </button>
-    <button class="action-btn">
+    <button class="action-btn" data-action="comment">
       ${commentIcon()}
       ${formatCompact(post.comment_count)}
     </button>
@@ -3444,6 +3605,10 @@ function renderDetailActions() {
 
   els.detailActions.querySelector('[data-action="like"]')?.addEventListener("click", () => {
     void toggleLike();
+  });
+  els.detailActions.querySelector('[data-action="comment"]')?.addEventListener("click", () => {
+    els.commentInput?.scrollIntoView({ block: "center" });
+    els.commentInput?.focus();
   });
   els.detailActions.querySelector('[data-action="bookmark"]')?.addEventListener("click", () => {
     toggleBookmark();
@@ -3688,10 +3853,76 @@ function renderDetailComments() {
           </div>
           <div class="comment-text">${escapeHtml(comment.content)}</div>
           ${comment.is_ai_agent && comment.author_disclosure ? `<span class="comment-disclosure">${escapeHtml(comment.author_disclosure)}</span>` : ""}
+          <div class="comment-actions" id="comment-${escapeAttribute(comment.id)}">
+            <button class="comment-action ${getCommentInteraction(comment.id).liked ? "liked" : ""}" type="button" data-action="comment-like" data-comment-id="${escapeAttribute(comment.id)}">赞 ${formatCompact(getCommentInteraction(comment.id).like_count)}</button>
+            <button class="comment-action" type="button" data-action="comment-reply" data-comment-id="${escapeAttribute(comment.id)}">回复</button>
+            <button class="comment-action" type="button" data-action="comment-share" data-comment-id="${escapeAttribute(comment.id)}">分享</button>
+          </div>
         </div>
       </div>
     `)
     .join("");
+
+  els.detailCommentsList.querySelectorAll('[data-action="comment-like"]').forEach((button) => {
+    button.addEventListener("click", () => {
+      toggleCommentLike(button.dataset.commentId);
+    });
+  });
+  els.detailCommentsList.querySelectorAll('[data-action="comment-reply"]').forEach((button) => {
+    button.addEventListener("click", () => {
+      const comment = state.detailComments.find((item) => item.id === button.dataset.commentId);
+      startCommentReply(comment);
+    });
+  });
+  els.detailCommentsList.querySelectorAll('[data-action="comment-share"]').forEach((button) => {
+    button.addEventListener("click", () => {
+      void shareComment(button.dataset.commentId);
+    });
+  });
+}
+
+function toggleCommentLike(commentId) {
+  if (!commentId) {
+    return;
+  }
+
+  const interactions = loadCommentInteractions();
+  const current = getCommentInteraction(commentId);
+  const liked = !current.liked;
+  interactions[commentId] = {
+    liked,
+    like_count: Math.max(0, current.like_count + (liked ? 1 : -1)),
+  };
+  window.localStorage.setItem(COMMENT_INTERACTIONS_STORAGE_KEY, JSON.stringify(interactions));
+  renderDetailComments();
+}
+
+function startCommentReply(comment) {
+  if (!comment || !els.commentInput) {
+    return;
+  }
+
+  els.commentInput.value = `@${comment.author_name || "Unknown"} `;
+  els.commentInput.scrollIntoView({ block: "center" });
+  els.commentInput.focus();
+}
+
+async function shareComment(commentId) {
+  if (!commentId) {
+    return;
+  }
+
+  const url = buildCommentShareUrl(commentId);
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(url);
+    } else {
+      await copyTextToClipboard(url);
+    }
+    setDetailActionStatus("Comment link copied.", "success");
+  } catch (error) {
+    setDetailActionStatus(error?.message || "Unable to copy comment link.", "error");
+  }
 }
 
 function renderLeaderboard({ mode = "replace", reason = "manual" } = {}) {
@@ -3928,9 +4159,39 @@ async function submitAuth() {
   renderAuthModeCompat();
   setStatus(
     els.authStatus,
-      "Signup successful. Please open the confirmation email, press Confirm, then 关闭确认页 and 回到这里登录.",
+    "Signup successful. Please open the confirmation email, press Confirm, then 关闭确认页 and 回到这里登录.",
     "success",
   );
+}
+
+function getCreateImageFile(files) {
+  return Array.from(files ?? []).find((file) => file?.type?.startsWith("image/")) ?? null;
+}
+
+function setCreateImagePreview(file) {
+  state.createImageFile = file ?? null;
+
+  if (state.createImagePreviewUrl) {
+    URL.revokeObjectURL(state.createImagePreviewUrl);
+    state.createImagePreviewUrl = null;
+  }
+
+  if (!els.createUploadArea || !els.createUploadLabel) {
+    return;
+  }
+
+  els.createUploadArea.classList.remove("has-preview", "is-dragover");
+  els.createUploadArea.style.backgroundImage = "";
+  els.createUploadLabel.textContent = CREATE_UPLOAD_LABEL_DEFAULT;
+
+  if (!file) {
+    return;
+  }
+
+  state.createImagePreviewUrl = URL.createObjectURL(file);
+  els.createUploadArea.style.backgroundImage = `url("${state.createImagePreviewUrl}")`;
+  els.createUploadArea.classList.add("has-preview");
+  els.createUploadLabel.textContent = CREATE_UPLOAD_LABEL_PREVIEW;
 }
 
 async function submitPost() {
@@ -4007,9 +4268,8 @@ async function submitPost() {
   if (els.createSupportDeadlineInput) {
     els.createSupportDeadlineInput.value = "";
   }
-  state.createImageFile = null;
   syncCreateSupportControls({ preserveValue: false });
-  els.createUploadLabel.textContent = "点击或拖拽上传图片";
+  setCreateImagePreview(null);
   setStatus(els.createStatus, "Post published successfully.", "success");
 
   await loadHomepageData();
@@ -4038,6 +4298,57 @@ async function uploadSelectedImage(file) {
 
   const { data } = state.supabase.storage.from(STORAGE_BUCKET).getPublicUrl(filePath);
   return normalizePostImageUrl(data.publicUrl);
+}
+
+async function uploadProfileAvatar(file) {
+  if (!state.user || !state.supabase) {
+    navigate("auth");
+    return false;
+  }
+
+  setStatus(els.profileAvatarStatus, "Uploading avatar...");
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "-");
+  const filePath = `${state.user.id}/avatar-${Date.now()}-${safeName}`;
+  const { error } = await state.supabase.storage
+    .from(STORAGE_BUCKET)
+    .upload(filePath, file, { upsert: false });
+
+  if (error) {
+    setStatus(els.profileAvatarStatus, error.message, "error");
+    return false;
+  }
+
+  const { data } = state.supabase.storage.from(STORAGE_BUCKET).getPublicUrl(filePath);
+  return updateProfileAvatar(normalizePostImageUrl(data.publicUrl));
+}
+
+async function updateProfileAvatar(avatarValue) {
+  if (!state.user || !state.supabase) {
+    navigate("auth");
+    return false;
+  }
+
+  const { error } = await state.supabase
+    .from("profiles")
+    .update({ avatar_url: avatarValue })
+    .eq("id", state.user.id);
+
+  if (error) {
+    setStatus(els.profileAvatarStatus, error.message, "error");
+    return false;
+  }
+
+  state.profile = {
+    ...(state.profile || { id: state.user.id }),
+    avatar_url: avatarValue,
+  };
+  renderProfileAvatar();
+  updateAuthUi();
+  setStatus(els.profileAvatarStatus, "Avatar updated.", "success");
+  if (els.profileAvatarInput) {
+    els.profileAvatarInput.value = "";
+  }
+  return true;
 }
 
 async function submitComment() {
@@ -4272,7 +4583,19 @@ function renderProfileActivity() {
     `;
 }
 
+function renderProfileAvatar() {
+  const name = state.profile?.username || state.user?.email?.split("@")[0] || "Guest";
+  const avatarValue = state.profile?.avatar_url || DEFAULT_PROFILE_AVATAR;
+
+  renderAvatarElement(els.profileAvatar, avatarValue, name);
+  if (els.profileEmojiSelect) {
+    els.profileEmojiSelect.value = isEmojiAvatar(avatarValue) ? avatarValue : DEFAULT_PROFILE_AVATAR;
+  }
+}
+
 function renderProfileWallet() {
+  renderProfileAvatar();
+
   const walletUnsupported = state.walletFeatureStatus === "unsupported";
   if (els.profileStatLabels?.length >= 3) {
     els.profileStatLabels[0].textContent = "Posts";
@@ -4335,7 +4658,7 @@ function renderProfileWallet() {
         <div class="profile-reward-notice">
           <strong>奖励机制公告</strong>
           <ul>
-            <li>新账号首次登录奖励 500 oute；如果邮箱确认后没立即到账，下一次登录会自动补领。</li>
+            <li>新账号首次登录奖励 1500 oute；如果邮箱确认后没立即到账，下一次登录会自动补领。</li>
             <li>每日首次登录奖励 30 oute，每个账号每天只发一次。</li>
             <li>帖子详情里的 YES / NO 站队消耗 50 oute，站队后会锁定同一市场方向。</li>
           </ul>
@@ -4430,6 +4753,7 @@ function renderDetailOdds() {
   const primaryPrediction = hotPrediction ?? flamePrediction ?? roastPrediction;
   const marketType = getPrimaryDetailMarketType(post, state.detailPredictions);
   const marketDeadline = resolveMarketDeadline({ post, prediction: primaryPrediction, marketType });
+  const marketResult = getPostMarketResult(post);
   const fallbackProbability = primaryPrediction?.probability ?? post.hot_probability ?? 52;
   const supportBoardSignal = findSupportBoardSignal(state.supportBoardItems, post.id, marketType);
   const detailSupportBoardItem = state.detailPostId === post.id
@@ -4463,6 +4787,9 @@ function renderDetailOdds() {
   const lockedSide = getMarketPositionSide(state.detailUserBets, marketType);
   const ownPostLocked = isCurrentUserPostAuthor(post);
   const sideStatusText = ownPostLocked ? getOwnPostMarketLockMessage() : getMarketSideStatusText(lockedSide);
+  const resultStatusText = getMarketCountdownSnapshot(marketDeadline).expired
+    ? (marketResult ? `Result: ${getPostMarketResultLabel(marketResult)}` : "Waiting for author result.")
+    : sideStatusText;
   const yesBlocked = ownPostLocked || isMarketSideBlocked(lockedSide, "yes");
   const noBlocked = ownPostLocked || isMarketSideBlocked(lockedSide, "no");
   const yesButtonText = lockedSide === "yes" ? "追加 YES · 50 oute" : "站队 YES · 50 oute";
@@ -4546,6 +4873,7 @@ function renderDetailOdds() {
         <button class="post-market-bet-btn primary" type="button" data-action="stake-post-side" data-market-type="${marketType}" data-side="yes" data-stake="50"${yesDisabledAttr}>${yesButtonText}</button>
         <button class="post-market-bet-btn" type="button" data-action="stake-post-side" data-market-type="${marketType}" data-side="no" data-stake="50"${noDisabledAttr}>${noButtonText}</button>
       </div>
+      ${renderPostMarketResultControls({ post, marketDeadline })}
     </div>
     ${state.detailPredictions.slice(0, 3).map((item) => `
       <div class="agent-predict" style="margin-top:14px">
@@ -4560,7 +4888,7 @@ function renderDetailOdds() {
       </div>
     `).join("")}
     ${renderDetailMarketPosition({ post, marketType, marketDeadline })}
-    <div class="inline-status" id="detailOddsStatus">${escapeHtml(sideStatusText)}</div>
+    <div class="inline-status" id="detailOddsStatus">${escapeHtml(resultStatusText)}</div>
   `;
 
   els.detailOddsModule.querySelectorAll('[data-action="stake-post-side"]').forEach((button) => {
@@ -4581,6 +4909,15 @@ function renderDetailOdds() {
     void claimPostMarketRewards({
       postId: post.id,
       marketType,
+    });
+  });
+
+  els.detailOddsModule.querySelectorAll('[data-action="publish-post-market-result"]').forEach((button) => {
+    button.addEventListener("click", () => {
+      void publishPostMarketResult({
+        postId: post.id,
+        result: button.dataset.result,
+      });
     });
   });
 
@@ -4623,6 +4960,33 @@ function renderDetailSupportTrend({
   });
 }
 
+function renderPostMarketResultControls({ post, marketDeadline }) {
+  const countdownSnapshot = getMarketCountdownSnapshot(marketDeadline);
+  if (!countdownSnapshot.expired) {
+    return "";
+  }
+
+  const result = getPostMarketResult(post);
+  if (result) {
+    return `<div class="support-opt-out-note" style="margin-top:12px">Result: ${escapeHtml(getPostMarketResultLabel(result))}</div>`;
+  }
+
+  if (!isCurrentUserPostAuthor(post)) {
+    return `<div class="support-opt-out-note" style="margin-top:12px">Waiting for the post author to publish the result.</div>`;
+  }
+
+  return `
+    <div class="support-opt-out-note" style="margin-top:12px">
+      <strong style="display:block;margin-bottom:8px;color:var(--text-primary)">Publish result</strong>
+      <div class="post-market-buttons">
+        <button class="post-market-bet-btn primary" type="button" data-action="publish-post-market-result" data-result="yes">YES wins</button>
+        <button class="post-market-bet-btn" type="button" data-action="publish-post-market-result" data-result="no">NO wins</button>
+        <button class="post-market-bet-btn" type="button" data-action="publish-post-market-result" data-result="refund">Invalid refund</button>
+      </div>
+    </div>
+  `;
+}
+
 function renderDetailMarketPosition({ post, marketType, marketDeadline }) {
   const position = summarizeMarketPosition(state.detailUserBets, marketType);
   if (!state.user || position.count === 0) {
@@ -4630,6 +4994,7 @@ function renderDetailMarketPosition({ post, marketType, marketDeadline }) {
   }
 
   const countdownSnapshot = getMarketCountdownSnapshot(marketDeadline);
+  const marketResult = getPostMarketResult(post);
 
   return `
     <div class="support-opt-out-note">
@@ -4637,7 +5002,9 @@ function renderDetailMarketPosition({ post, marketType, marketDeadline }) {
       <div>YES ${formatCompact(position.yesStake)} oute · NO ${formatCompact(position.noStake)} oute · 已投入 ${formatCompact(position.totalStaked)} oute</div>
       <div style="margin-top:6px">按下注时锁定的 odds 估算，最高可结算 ${formatCompact(position.potentialPayout)} oute。</div>
       ${position.claimedPayout > 0 ? `<div style="margin-top:6px">已结算到钱包：${formatCompact(position.claimedPayout)} oute</div>` : ""}
-      ${countdownSnapshot.expired && position.unsettledCount > 0
+      ${countdownSnapshot.expired && !marketResult
+        ? `<div style="margin-top:8px">Waiting for the post author to publish the result.</div>`
+        : countdownSnapshot.expired && position.unsettledCount > 0
         ? `<button class="post-market-bet-btn primary" type="button" data-action="claim-post-market-reward" style="margin-top:12px">结算 odds 奖励</button>`
         : countdownSnapshot.expired
           ? `<div style="margin-top:8px">这场市场已经完成结算。</div>`
@@ -4899,25 +5266,13 @@ async function handlePostSideStake(button) {
     return;
   }
 
+  playPostMarketOuteImpact(button);
   await Promise.allSettled([
     refreshWalletModule(),
     loadHomepageData(),
     state.detailPostId === post.id ? loadDetailData(post.id) : Promise.resolve(),
   ]);
 
-  pulseElement(button);
-  spawnBurstParticles(button, {
-    className: "is-coin",
-    glyphs: ["oute", "oute", "+", "+1"],
-    count: 8,
-    spreadX: 160,
-    minY: -150,
-    maxY: -45,
-    sizeMin: 11,
-    sizeMax: 14,
-    endScale: 0.76,
-  });
-  triggerOuteRainBurst();
   setStatus(statusEl, result.message, "success");
 }
 
@@ -4976,25 +5331,13 @@ async function handleFeedPostSideStake(button) {
     return;
   }
 
+  playPostMarketOuteImpact(button);
   await Promise.allSettled([
     refreshWalletModule(),
     loadHomepageData(),
     state.detailPostId === post.id ? loadDetailData(post.id) : Promise.resolve(),
   ]);
 
-  pulseElement(button);
-  spawnBurstParticles(button, {
-    className: "is-coin",
-    glyphs: ["oute", "oute", "+", "+1"],
-    count: 7,
-    spreadX: 140,
-    minY: -130,
-    maxY: -40,
-    sizeMin: 11,
-    sizeMax: 14,
-    endScale: 0.76,
-  });
-  triggerOuteRainBurst();
   setStatus(document.getElementById(`feedPostStatus-${postId}`) ?? statusEl, result.message, "success");
 }
 
@@ -5334,7 +5677,41 @@ function renderParagraphs(text) {
     .join("<br>");
 }
 
+function isEmojiAvatar(value) {
+  return String(value || "").startsWith("emoji:");
+}
+
+function getEmojiAvatar(value) {
+  return isEmojiAvatar(value) ? String(value).slice("emoji:".length) || DEFAULT_PROFILE_AVATAR.slice("emoji:".length) : "";
+}
+
+function renderAvatarElement(element, avatarValue, label) {
+  if (!element) {
+    return;
+  }
+
+  element.style.backgroundImage = "";
+  element.textContent = "";
+  if (isEmojiAvatar(avatarValue)) {
+    element.textContent = getEmojiAvatar(avatarValue);
+    return;
+  }
+
+  if (avatarValue) {
+    element.style.backgroundImage = `url("${avatarValue}")`;
+    element.style.backgroundSize = "cover";
+    element.style.backgroundPosition = "center";
+    return;
+  }
+
+  element.textContent = (label || "?").slice(0, 1).toUpperCase();
+}
+
 function renderAvatar(className, imageUrl, label) {
+  if (isEmojiAvatar(imageUrl)) {
+    return `<div class="${className}" style="display:flex;align-items:center;justify-content:center;">${escapeHtml(getEmojiAvatar(imageUrl))}</div>`;
+  }
+
   if (imageUrl) {
     return `<div class="${className}" style="background-image:url('${escapeAttribute(imageUrl)}');background-size:cover;background-position:center;"></div>`;
   }

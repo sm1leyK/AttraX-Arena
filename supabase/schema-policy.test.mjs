@@ -33,6 +33,10 @@ const ownPostMarketMigrationSql = readFileSync(
   new URL("./migrations/20260425000200_block_own_post_market_bets.sql", import.meta.url),
   "utf8",
 );
+const agentAutoCommentCronMigrationSql = readFileSync(
+  new URL("./migrations/20260425001000_agent_auto_comment_cron.sql", import.meta.url),
+  "utf8",
+);
 
 test("migration files use unique Supabase versions", () => {
   const versions = migrationFileNames.map((fileName) => fileName.split("_", 1)[0]);
@@ -156,6 +160,7 @@ test("support board exposes a public realtime event stream", () => {
 test("support board trend RPCs expose cumulative stance data to browser clients", () => {
   const marketSeriesSql = extractSqlFunction("get_post_market_series");
   const homepageBoardSql = extractSqlFunction("get_homepage_support_board");
+  const deadlineValidationSql = extractSqlFunction("validate_support_board_post_deadline");
 
   assert.match(marketSeriesSql, /total_amount_cumulative bigint/);
   assert.match(marketSeriesSql, /sample_count_cumulative integer/);
@@ -163,6 +168,14 @@ test("support board trend RPCs expose cumulative stance data to browser clients"
   assert.match(marketSeriesSql, /sum\(f\.total_amount_bucket\) over w/);
   assert.match(homepageBoardSql, /total_amount_total bigint/);
   assert.match(homepageBoardSql, /latest_bet_at timestamptz/);
+  assert.match(homepageBoardSql, /support_board_deadline_at timestamptz/);
+  assert.match(homepageBoardSql, /support_board_result text/);
+  assert.match(homepageBoardSql, /support_board_status text/);
+  assert.match(homepageBoardSql, /when fp\.support_board_result is not null then 'ended'/i);
+  assert.match(homepageBoardSql, /when fp\.support_board_deadline_at <= timezone\('utc', now\(\)\) then 'ended'/i);
+  assert.doesNotMatch(homepageBoardSql, /fp\.support_board_deadline_at > timezone\('utc', now\(\)\)/i);
+  assert.match(deadlineValidationSql, /new\.support_board_deadline_at := v_max_deadline;/i);
+  assert.doesNotMatch(deadlineValidationSql, /support board deadline is required when participates_in_support_board is true/i);
   assert.match(
     schemaSql,
     /grant execute on function public\.get_post_market_series\(uuid, text, integer, integer\) to anon, authenticated;/i,
@@ -171,6 +184,55 @@ test("support board trend RPCs expose cumulative stance data to browser clients"
     schemaSql,
     /grant execute on function public\.get_homepage_support_board\(text, integer, integer, integer\) to anon, authenticated;/i,
   );
+});
+
+test("support board status migration keeps ended posts queryable", () => {
+  const statusMigrationFileName = migrationFileNames.find((fileName) =>
+    fileName === "20260425000800_support_board_status_filters.sql");
+  assert.ok(statusMigrationFileName);
+
+  const statusMigrationSql = readFileSync(new URL(`./migrations/${statusMigrationFileName}`, import.meta.url), "utf8");
+  assert.match(statusMigrationSql, /drop function if exists public\.get_homepage_support_board\(text, integer, integer, integer\);/i);
+  assert.match(statusMigrationSql, /support_board_deadline_at timestamptz/i);
+  assert.match(statusMigrationSql, /support_board_result text/i);
+  assert.match(statusMigrationSql, /support_board_status text/i);
+  assert.match(statusMigrationSql, /when fp\.support_board_result is not null then 'ended'/i);
+  assert.match(statusMigrationSql, /when fp\.support_board_deadline_at <= timezone\('utc', now\(\)\) then 'ended'/i);
+  assert.doesNotMatch(statusMigrationSql, /fp\.support_board_deadline_at > timezone\('utc', now\(\)\)/i);
+  assert.match(statusMigrationSql, /new\.support_board_deadline_at := v_max_deadline;/i);
+  assert.doesNotMatch(statusMigrationSql, /support board deadline is required when participates_in_support_board is true/i);
+});
+
+test("support board result fields are added before trigger functions read them", () => {
+  const allMigrationSql = migrationFileNames
+    .map((fileName) => readFileSync(new URL(`./migrations/${fileName}`, import.meta.url), "utf8"))
+    .join("\n\n");
+
+  assert.match(allMigrationSql, /alter table public\.posts\s+add column if not exists support_board_result text/i);
+  assert.match(allMigrationSql, /alter table public\.posts\s+add column if not exists support_board_result_at timestamptz/i);
+  assert.match(
+    allMigrationSql,
+    /alter table public\.posts\s+add column if not exists support_board_result_by uuid references public\.profiles \(id\) on delete set null/i,
+  );
+  assert.match(allMigrationSql, /create or replace view public\.feed_posts[\s\S]*p\.support_board_result/i);
+});
+
+test("agent auto-comment cron is server-side and secret-backed", () => {
+  assert.match(agentAutoCommentCronMigrationSql, /create extension if not exists pg_net/i);
+  assert.match(agentAutoCommentCronMigrationSql, /create extension if not exists pg_cron/i);
+  assert.match(agentAutoCommentCronMigrationSql, /cron\.schedule\(\s*'agent-auto-comment-every-10-minutes'/i);
+  assert.match(agentAutoCommentCronMigrationSql, /'\*\/10 \* \* \* \*'/);
+  assert.match(agentAutoCommentCronMigrationSql, /net\.http_post/i);
+  assert.match(agentAutoCommentCronMigrationSql, /\/functions\/v1\/agent-auto-comment/i);
+  assert.match(agentAutoCommentCronMigrationSql, /x-agent-runner-secret/i);
+  assert.match(agentAutoCommentCronMigrationSql, /vault\.decrypted_secrets/i);
+  assert.match(agentAutoCommentCronMigrationSql, /agent_auto_comment_project_url/i);
+  assert.match(agentAutoCommentCronMigrationSql, /agent_auto_comment_runner_secret/i);
+  assert.match(agentAutoCommentCronMigrationSql, /'max_comments',\s*1/i);
+  assert.match(agentAutoCommentCronMigrationSql, /'dry_run',\s*false/i);
+  assert.doesNotMatch(agentAutoCommentCronMigrationSql, /OPENAI_API_KEY\s*=/i);
+  assert.doesNotMatch(agentAutoCommentCronMigrationSql, /SUPABASE_SERVICE_ROLE_KEY\s*=/i);
+  assert.doesNotMatch(agentAutoCommentCronMigrationSql, /sk-[A-Za-z0-9_-]+/i);
 });
 
 test("support board trend migration can be applied to live Supabase", () => {
@@ -188,7 +250,7 @@ test("support board trend migration can be applied to live Supabase", () => {
   );
 });
 
-test("app feature flags disable leaderboard and activity by default", () => {
+test("app feature flags enable leaderboard and activity by default", () => {
   assert.match(schemaSql, /create table if not exists public\.app_feature_flags/i);
   assert.match(schemaSql, /feature_key text primary key/i);
   assert.match(schemaSql, /enabled boolean not null default false/i);
@@ -197,8 +259,8 @@ test("app feature flags disable leaderboard and activity by default", () => {
     schemaSql,
     /create policy "App feature flags are viewable by everyone"[\s\S]*?on public\.app_feature_flags[\s\S]*?for select[\s\S]*?using \(true\);/i,
   );
-  assert.match(schemaSql, /\('leaderboard', false, '排行榜',/i);
-  assert.match(schemaSql, /\('activity', false, '活动',/i);
+  assert.match(schemaSql, /\('leaderboard', true, '排行榜',/i);
+  assert.match(schemaSql, /\('activity', true, '活动',/i);
   assert.match(
     schemaSql,
     /on conflict \(feature_key\) do update\s+set[\s\S]*?enabled = excluded\.enabled[\s\S]*?description = excluded\.description;/i,
@@ -213,8 +275,8 @@ test("app feature flags disable leaderboard and activity by default", () => {
 test("app feature flags migration can be applied to live Supabase", () => {
   assert.match(featureFlagsMigrationSql, /create table if not exists public\.app_feature_flags/i);
   assert.match(featureFlagsMigrationSql, /create or replace function public\.get_app_feature_flags\(\)/i);
-  assert.match(featureFlagsMigrationSql, /\('leaderboard', false, '排行榜',/i);
-  assert.match(featureFlagsMigrationSql, /\('activity', false, '活动',/i);
+  assert.match(featureFlagsMigrationSql, /\('leaderboard', true, '排行榜',/i);
+  assert.match(featureFlagsMigrationSql, /\('activity', true, '活动',/i);
   assert.match(
     featureFlagsMigrationSql,
     /on conflict \(feature_key\) do update\s+set[\s\S]*?enabled = excluded\.enabled[\s\S]*?description = excluded\.description;/i,

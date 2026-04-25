@@ -13,6 +13,7 @@ import {
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
 const indexHtml = readFileSync(join(currentDir, "index.html"), "utf8");
+const mobileIndexHtml = readFileSync(join(currentDir, "index.mobile.html"), "utf8");
 const appSource = readFileSync(join(currentDir, "app.mjs"), "utf8");
 
 test("treats empty post image values as no image", () => {
@@ -51,6 +52,28 @@ test("renders escaped image markup when a post has an image", () => {
   assert.match(feedMarkup, /src="https:\/\/example\.com\/a&quot;b\.png"/);
   assert.match(detailMarkup, /src="https:\/\/example\.com\/post\.png"/);
   assert.match(detailMarkup, /alt="A &quot;quoted&quot; title"/);
+});
+
+test("post images keep their aspect ratio and can open the original image", () => {
+  const feedMarkup = renderPostImage("https://example.com/post.png");
+  const detailMarkup = renderDetailImage("https://example.com/post.png", "Post title");
+
+  assert.match(feedMarkup, /<a class="post-image-link" href="https:\/\/example\.com\/post\.png"/);
+  assert.match(feedMarkup, /target="_blank"/);
+  assert.match(feedMarkup, /onclick="event\.stopPropagation\(\)"/);
+  assert.match(detailMarkup, /<a class="detail-image-link" href="https:\/\/example\.com\/post\.png"/);
+  assert.doesNotMatch(feedMarkup, /object-fit:cover|width:100%;display:block;max-height:220px/);
+  assert.doesNotMatch(detailMarkup, /object-fit:cover|width:100%;display:block;border-radius:16px;max-height:320px/);
+});
+
+test("static shells let post images size to their natural aspect ratio", () => {
+  for (const shellHtml of [indexHtml, mobileIndexHtml]) {
+    assert.doesNotMatch(shellHtml, /\.post-image-placeholder\s*\{[^}]*height:\s*200px/s);
+    assert.doesNotMatch(shellHtml, /\.detail-image-placeholder\s*\{[^}]*height:\s*320px/s);
+    assert.match(shellHtml, /\.post-image-placeholder\s*\{[^}]*height:\s*auto/s);
+    assert.match(shellHtml, /\.detail-image-placeholder\s*\{[^}]*height:\s*auto/s);
+    assert.match(shellHtml, /\.post-image-placeholder img,\s*\.detail-image-placeholder img\s*\{[^}]*max-width:\s*100%[^}]*height:\s*auto/s);
+  }
 });
 
 test("static shell does not show image placeholder frames for no-image posts", () => {

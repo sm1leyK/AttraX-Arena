@@ -12,8 +12,8 @@ create table if not exists public.app_feature_flags (
 
 insert into public.app_feature_flags (feature_key, enabled, label, description)
 values
-  ('leaderboard', false, '排行榜', 'Temporarily disabled while the ranking experience is de-emphasized.'),
-  ('activity', false, '活动', 'Temporarily disabled while the activity center is de-emphasized.')
+  ('leaderboard', true, '排行榜', 'Enabled as a routed MVP page.'),
+  ('activity', true, '活动', 'Enabled as a routed MVP page.')
 on conflict (feature_key) do update
 set
   enabled = excluded.enabled,

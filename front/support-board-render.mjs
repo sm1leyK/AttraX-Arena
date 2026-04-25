@@ -4,6 +4,7 @@ export function renderSupportBoard({
   seriesByKey,
   dataSource,
   supportBoardFilter,
+  supportBoardStatusFilter = "live",
   expandedSupportPostId,
   helpers,
 }) {
@@ -29,8 +30,17 @@ export function renderSupportBoard({
     { key: "high", label: "High" },
     { key: "swing", label: "Swing" },
   ];
+  const statusTabs = [
+    { key: "live", label: "正在开盘" },
+    { key: "ended", label: "已结束" },
+  ];
+  const normalizedStatusFilter = supportBoardStatusFilter === "ended" ? "ended" : "live";
 
   const filteredItems = items.filter((item) => {
+    if (getSupportBoardRenderStatus(item) !== normalizedStatusFilter) {
+      return false;
+    }
+
     const probability = Math.round(item.yes_rate || 0);
     if (supportBoardFilter === "high") {
       return probability >= 75;
@@ -48,6 +58,15 @@ export function renderSupportBoard({
       ${trendIcon()}
       Live Support Board
       <span class="support-board-live-dot"></span>
+    </div>
+    <div class="support-board-tabs">
+      ${statusTabs.map((tab) => `
+        <button
+          type="button"
+          class="support-board-tab ${normalizedStatusFilter === tab.key ? "active" : ""}"
+          onclick="event.stopPropagation(); setSupportBoardStatusFilter('${tab.key}')"
+        >${escapeHtml(tab.label)}</button>
+      `).join("")}
     </div>
     <div class="support-board-tabs">
       ${filterTabs.map((tab) => `
@@ -119,7 +138,7 @@ export function renderSupportBoard({
     `;
     }).join("") : `
       <div class="support-board-detail show" style="margin-top:10px">
-        当前筛选下暂无帖子，试试切回 All。
+        当前筛选下暂无帖子。
       </div>
     `}
   `;
@@ -159,6 +178,10 @@ export function bindSupportBoardInteractions({
 
 function getSupportBoardSeriesKey(postId, marketType, defaults) {
   return `${postId}:${marketType || defaults.marketType}`;
+}
+
+function getSupportBoardRenderStatus(item) {
+  return item?.support_board_status === "ended" ? "ended" : "live";
 }
 
 function renderSupportBoardSparkline(series, fallbackRate, clampNumber) {
