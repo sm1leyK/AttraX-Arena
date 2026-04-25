@@ -3993,8 +3993,16 @@ async function submitPost() {
     return;
   }
 
+  let effectiveDeadline = supportDeadlineDate;
   if (participatesInSupportBoard) {
-    const validation = buildSupportDeadlineValidation(supportDeadlineDate);
+    if (!effectiveDeadline || !Number.isFinite(effectiveDeadline.getTime())) {
+      const { minDate, maxDate } = getSupportDeadlineBounds();
+      effectiveDeadline = new Date(Math.min(maxDate.getTime(), minDate.getTime() + 60 * 60000));
+      if (els.createSupportDeadlineInput) {
+        els.createSupportDeadlineInput.value = formatForDateTimeLocal(effectiveDeadline);
+      }
+    }
+    const validation = buildSupportDeadlineValidation(effectiveDeadline);
     if (!validation.ok) {
       setStatus(els.createStatus, validation.message, "error");
       els.createSupportDeadlineInput?.focus();
@@ -4024,7 +4032,7 @@ async function submitPost() {
       image_url: normalizePostImageUrl(imageUrl),
       category: "discussion",
       participates_in_support_board: participatesInSupportBoard,
-      support_board_deadline_at: participatesInSupportBoard ? supportDeadlineDate.toISOString() : null,
+      support_board_deadline_at: participatesInSupportBoard && effectiveDeadline ? effectiveDeadline.toISOString() : null,
     })
     .select("id")
     .single();
