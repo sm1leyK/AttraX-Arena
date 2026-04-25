@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
 const appSource = readFileSync(join(currentDir, "app.mjs"), "utf8");
+const htmlSource = readFileSync(join(currentDir, "index.html"), "utf8");
 
 test("detail share action is wired to a post-specific share link", () => {
   assert.match(appSource, /data-action="share"/);
@@ -44,3 +45,34 @@ test("post market bars prefer live support-board rates over prediction fallbacks
   assert.match(appSource, /style="width:\$\{marketRate\.yesWidth\}%">YES \$\{marketRate\.yesRate\}%/);
   assert.match(appSource, /style="width:\$\{marketRate\.noWidth\}%">NO \$\{marketRate\.noRate\}%/);
 });
+
+test("detail comment composer stays outside the rerendered comments list", () => {
+  const listStart = htmlSource.indexOf('id="detailCommentsList"');
+  const composerStart = htmlSource.indexOf('class="comment-input-wrap"');
+
+  assert.ok(listStart > -1);
+  assert.ok(composerStart > -1);
+  assert.ok(composerStart > findClosingDivIndex(htmlSource, listStart));
+  assert.match(appSource, /els\.detailCommentsList\.innerHTML = state\.detailComments/);
+  assert.match(htmlSource, /<button class="comment-submit" type="button">/);
+});
+
+function findClosingDivIndex(source, openDivIndex) {
+  const tagPattern = /<\/?div\b[^>]*>/gi;
+  tagPattern.lastIndex = openDivIndex;
+  let depth = 0;
+
+  for (let match = tagPattern.exec(source); match; match = tagPattern.exec(source)) {
+    if (match[0].startsWith("</")) {
+      depth -= 1;
+      if (depth === 0) {
+        return match.index;
+      }
+      continue;
+    }
+
+    depth += 1;
+  }
+
+  return -1;
+}
