@@ -135,11 +135,15 @@ begin
       current_setting('app.settings.supabase_url', true),
       ''
     ) || '/functions/v1/agent-auto-comment';
+    -- Fallback: read from agent_config table
+    if v_edge_function_url = '/functions/v1/agent-auto-comment' then
+      select value into v_edge_function_url from public.agent_config where key = 'edge_function_url' limit 1;
+    end if;
   end if;
 
   v_runner_secret := current_setting('app.settings.agent_runner_secret', true);
   if v_runner_secret is null then
-    v_runner_secret := 'attrax-local-runner-secret';
+    select value into v_runner_secret from public.agent_config where key = 'agent_runner_secret' limit 1;
   end if;
 
   -- Build payload
@@ -160,21 +164,14 @@ begin
 
   -- Call the Edge Function asynchronously via pg_net
   -- This is non-blocking: the trigger returns immediately
-  insert into net.http_request (
-    method,
-    url,
-    headers,
-    body,
-    timeout_milliseconds
-  ) values (
-    'POST',
-    v_edge_function_url,
-    jsonb_build_object(
+  perform net.http_post(
+    url := v_edge_function_url,
+    headers := jsonb_build_object(
       'Content-Type', 'application/json',
       'x-agent-runner-secret', v_runner_secret
     ),
-    v_payload,
-    30000
+    body := v_payload,
+    timeout_milliseconds := 30000
   );
 
   return new;
@@ -188,6 +185,4 @@ after insert on public.comments
 for each row
 execute function public.trigger_agent_reactive_reply();
 
--- ── 8. Grant necessary permissions ──
-grant usage on schema net to postgres;
-grant select on net.http_request to postgres;
+-- ── 8. pg_net runs in extensions schema; trigger uses security definer so no extra grants needed
