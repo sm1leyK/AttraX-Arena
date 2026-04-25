@@ -681,6 +681,7 @@ async function refreshSession() {
   updateAuthUi();
   renderProfileWallet();
   await renderProfilePosts();
+  redirectAuthenticatedAuthRoute();
 }
 
 async function loadProfile() {
@@ -2698,6 +2699,10 @@ function handleBrowserRouteChange() {
 }
 
 function applyBrowserRoute(route = readInitialRoute(window.location.href)) {
+  if (redirectAuthenticatedAuthRoute(route.page)) {
+    return;
+  }
+
   if (route.page === "detail" && route.postId) {
     openDetailById(route.postId, { updateRoute: false });
     return;
@@ -2770,6 +2775,19 @@ function navigate(page, options = {}) {
   return true;
 }
 
+function redirectAuthenticatedAuthRoute(page = state.initialRoutePage) {
+  if (!state.user || page !== "auth") {
+    return false;
+  }
+
+  if (state.initialRoutePage === "auth") {
+    state.initialRoutePage = "home";
+  }
+
+  navigate("home", { replaceRoute: true });
+  return true;
+}
+
 function toggleAuth() {
   state.isLogin = !state.isLogin;
   renderAuthModeCompat();
@@ -2785,7 +2803,7 @@ function renderAuthMode() {
   els.authPrimaryInput.placeholder = state.isLogin ? "Enter your email" : "Enter your username";
   els.authSubtitle.textContent = state.isLogin ? "登录你的 AttraX 账号" : "注册一个新的 AttraX 账号";
   els.authHelp.textContent = state.isLogin
-    ? "Login uses your registered email only. After pressing Confirm in the email, 关闭确认页 and 回到这里登录."
+    ? "Login uses your registered email only. 本设备会保持登录状态，除非你手动退出或浏览器清除站点数据。After pressing Confirm in the email, 关闭确认页 and 回到这里登录."
     : "Signup requires username, email, and password. If email verification opens, press Confirm, then 关闭确认页 and 回到这里登录.";
   els.authButton.textContent = state.isLogin ? "登录" : "注册";
   els.authSwitch.innerHTML = state.isLogin
@@ -2810,7 +2828,7 @@ function renderAuthModeCompat() {
 
   if (els.authHelp) {
     els.authHelp.textContent = state.isLogin
-    ? "This UI supports username lookup, then email + password login. After pressing Confirm in the email, 关闭确认页 and 回到这里登录."
+    ? "This UI supports username lookup, then email + password login. 本设备会保持登录状态，除非你手动退出或浏览器清除站点数据。After pressing Confirm in the email, 关闭确认页 and 回到这里登录."
     : "Signup requires username, email, and password. If email verification opens, press Confirm, then 关闭确认页 and 回到这里登录.";
   }
 
