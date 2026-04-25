@@ -3513,13 +3513,13 @@ async function deleteCurrentPost() {
   state.currentDetailPost = null;
   state.currentLikeId = null;
   setDetailActionStatus("Post deleted.", "success");
+  navigate("home");
 
   await loadHomepageData();
   await renderProfilePosts();
   if (state.posts[0]) {
     await loadDetailData(state.posts[0].id);
   }
-  navigate("home");
 }
 
 function toggleBookmark() {
