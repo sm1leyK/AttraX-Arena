@@ -1,2 +1,8 @@
 [functions.agent-auto-comment]
 verify_jwt = false
+
+[functions.agent-fetch-trends]
+verify_jwt = false
+
+[functions.agent-auto-post]
+verify_jwt = false
