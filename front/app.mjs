@@ -2718,8 +2718,8 @@ function renderAuthMode() {
   els.authPrimaryInput.placeholder = state.isLogin ? "Enter your email" : "Enter your username";
   els.authSubtitle.textContent = state.isLogin ? "登录你的 AttraX 账号" : "注册一个新的 AttraX 账号";
   els.authHelp.textContent = state.isLogin
-    ? "Login uses your registered email only."
-    : "Signup requires username, email, and password.";
+    ? "Login uses your registered email only. After pressing Confirm in the email, 关闭确认页 and 回到这里登录."
+    : "Signup requires username, email, and password. If email verification opens, press Confirm, then 关闭确认页 and 回到这里登录.";
   els.authButton.textContent = state.isLogin ? "登录" : "注册";
   els.authSwitch.innerHTML = state.isLogin
     ? '还没有账号？<a onclick="toggleAuth()">立即注册</a>'
@@ -2743,8 +2743,8 @@ function renderAuthModeCompat() {
 
   if (els.authHelp) {
     els.authHelp.textContent = state.isLogin
-    ? "This UI keeps the older layout, but the backend currently uses email + password login."
-    : "Signup requires username, email, and password.";
+    ? "This UI supports username lookup, then email + password login. After pressing Confirm in the email, 关闭确认页 and 回到这里登录."
+    : "Signup requires username, email, and password. If email verification opens, press Confirm, then 关闭确认页 and 回到这里登录.";
   }
 
   els.authButton.textContent = state.isLogin ? "登录" : "注册";
@@ -3838,7 +3838,7 @@ async function submitAuth() {
   renderAuthModeCompat();
   setStatus(
     els.authStatus,
-      "Signup successful. Please log in with the email you just used. If email confirmation is enabled, confirm it first.",
+      "Signup successful. Please open the confirmation email, press Confirm, then 关闭确认页 and 回到这里登录.",
     "success",
   );
 }
@@ -4240,6 +4240,14 @@ function renderProfileWallet() {
           <span class="profile-wallet-label">Last reward</span>
           <strong>${state.wallet.last_rewarded_at ? formatRelativeTime(state.wallet.last_rewarded_at) : "--"}</strong>
         </div>
+        <div class="profile-reward-notice">
+          <strong>奖励机制公告</strong>
+          <ul>
+            <li>新账号首次登录奖励 500 oute；如果邮箱确认后没立即到账，下一次登录会自动补领。</li>
+            <li>每日首次登录奖励 30 oute，每个账号每天只发一次。</li>
+            <li>帖子详情里的 YES / NO 站队消耗 50 oute，站队后会锁定同一市场方向。</li>
+          </ul>
+        </div>
       `
       : `
         <div class="profile-wallet-empty">
@@ -4313,11 +4321,7 @@ function renderDetailOdds() {
   const marketDeadline = resolveMarketDeadline({ post, prediction: primaryPrediction, marketType });
   const yesProbability = clampNumber(Math.round(primaryPrediction?.probability ?? post.hot_probability ?? 52), 6, 94);
   const noProbability = 100 - yesProbability;
-  const marketQuestion = marketType === "flamewar"
-    ? "Will this post trigger a flame-war?"
-    : marketType === "get_roasted"
-      ? "Will this post get roasted by the community?"
-      : "Will this post go viral in 24 hours?";
+  const marketQuestion = post.title || "Untitled post";
   const marketLabel = marketType === "flamewar"
     ? "Flame-War Market"
     : marketType === "get_roasted"
