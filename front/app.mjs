@@ -116,6 +116,7 @@ const state = {
   walletFeatureStatus: FEATURE_GATES.wallet ? "unknown" : "unsupported",
   walletStatus: null,
   walletError: null,
+  lastSignupBonusAttemptUserId: null,
   lastWalletRewardAttemptKey: null,
   featureFlags: { ...DEFAULT_FEATURE_FLAGS },
   disabledNavPages: getDisabledNavPages(DEFAULT_FEATURE_FLAGS),
@@ -682,6 +683,7 @@ async function loadProfile() {
     state.walletTransactions = [];
     state.walletStatus = null;
     state.walletError = null;
+    state.lastSignupBonusAttemptUserId = null;
     state.lastWalletRewardAttemptKey = null;
     return;
   }
@@ -848,9 +850,12 @@ async function ensureWalletExperience({ reason, allowDailyReward }) {
   }
 
   const rewardAttemptKey = `${state.user.id}:${new Date().toISOString().slice(0, 10)}`;
+  const shouldAttemptSignupBonus =
+    reason === "signup" || state.lastSignupBonusAttemptUserId !== state.user.id;
   state.walletError = null;
 
-  if (reason === "signup") {
+  if (shouldAttemptSignupBonus) {
+    state.lastSignupBonusAttemptUserId = state.user.id;
     const signupResult = await invokeRewardFunction("reconcile-signup-bonus", 3);
     if (signupResult.ok) {
       state.walletStatus = signupResult.reward_granted
@@ -2818,6 +2823,7 @@ async function doLogout() {
   state.walletTransactions = [];
   state.walletStatus = null;
   state.walletError = null;
+  state.lastSignupBonusAttemptUserId = null;
   state.currentLikeId = null;
   updateAuthUi();
   renderProfileWallet();
