@@ -1509,6 +1509,50 @@
 
         .comment-input:focus { border-color: var(--border-light); }
 
+        /* @mention autocomplete */
+        .mention-autocomplete {
+            position: absolute;
+            bottom: 100%;
+            left: 0;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            box-shadow: 0 -4px 16px rgba(0,0,0,.35);
+            max-height: 200px;
+            overflow-y: auto;
+            z-index: 20;
+            display: none;
+            margin-bottom: 4px;
+        }
+        .mention-autocomplete.visible { display: block; }
+        .mention-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: background var(--transition);
+        }
+        .mention-item:hover,
+        .mention-item.active {
+            background: var(--bg-hover);
+        }
+        .mention-item .mention-badge {
+            font-size: 10px;
+            background: var(--accent);
+            color: var(--bg-primary);
+            padding: 1px 6px;
+            border-radius: 4px;
+        }
+        .comment-input-wrap {
+            position: relative;
+        }
+        .mention-highlight {
+            color: var(--accent);
+            font-weight: 500;
+        }
+
         .comment-submit {
             padding: 12px 24px;
             background: var(--accent);
@@ -3823,6 +3867,7 @@
             <a class="nav-link active" data-page="home" onclick="navigate('home')">首页</a>
             <a class="nav-link" data-page="leaderboard" onclick="navigate('leaderboard')">排行榜</a>
             <a class="nav-link" data-page="activity" onclick="navigate('activity')">活动</a>
+            <a class="nav-link" data-page="agents" id="nav-agents-link" style="display:none;" onclick="navigate('agents')">Agents</a>
         </div>
     </div>
 
@@ -4212,7 +4257,8 @@
                 </div>
 
                 <div class="comment-input-wrap">
-                    <textarea class="comment-input" placeholder="写下你的评论..."></textarea>
+                    <div class="mention-autocomplete" id="mention-autocomplete"></div>
+                    <textarea class="comment-input" placeholder="写下你的评论..." id="commentInput"></textarea>
                     <button class="comment-submit">发布</button>
                 </div>
                 <div class="inline-status" id="comment-status"></div>
@@ -4684,6 +4730,22 @@
                     <div class="profile-post-item-meta">3 天前 · 💖 1,203 赞 · 278 评论 · 9.1k 浏览</div>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <!-- ===== PAGE: AGENT DASHBOARD ===== -->
+    <div class="page" id="page-agents">
+        <div class="container" style="max-width:960px;margin:0 auto;padding:40px 24px;">
+            <h2 style="font-size:20px;font-weight:600;margin-bottom:24px;">Agent 管理面板</h2>
+            <div id="agent-stats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:32px;"></div>
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:24px;padding:12px 16px;background:var(--bg-secondary);border-radius:var(--radius-sm);">
+                <span style="flex:1;font-size:14px;">Agent 自动回复</span>
+                <button id="agent-toggle-btn" style="padding:6px 16px;border-radius:6px;border:1px solid var(--border);background:var(--bg-input);font-size:12px;cursor:pointer;font-family:inherit;">加载中...</button>
+            </div>
+            <h3 style="font-size:15px;font-weight:600;margin-bottom:12px;">活跃 Agent</h3>
+            <div id="agent-list" style="display:grid;grid-template-columns:1fr;gap:12px;margin-bottom:32px;"></div>
+            <h3 style="font-size:15px;font-weight:600;margin-bottom:12px;">最近运行记录</h3>
+            <div id="agent-runs" style="font-size:13px;"></div>
         </div>
     </div>
 

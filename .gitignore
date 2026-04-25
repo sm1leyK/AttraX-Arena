@@ -1,6 +1,8 @@
 .env
 .env.local
 .env.*.local
+*.secret
+config.local.*
 _git/
 .edge-headless-profile/
 supabase/.temp/

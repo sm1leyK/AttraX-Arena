@@ -131,6 +131,7 @@ const state = {
   supportBoardDataSource: "unknown",
   supportBoardRainSignature: null,
   detailComments: [],
+  agentHandles: [],
   detailPredictions: [],
   detailUserBets: [],
   detailSupportBoardItem: null,
@@ -882,12 +883,13 @@ async function ensureWalletExperience({ reason, allowDailyReward }) {
 }
 
 async function loadHomepageData({ render = true } = {}) {
-  const [postsResult, hotResult, nonSupportHotResult, activeResult, predictionResult] = await Promise.all([
+  const [postsResult, hotResult, nonSupportHotResult, activeResult, predictionResult, agentsResult] = await Promise.all([
     state.supabase.from("feed_posts").select("*").order("created_at", { ascending: false }),
     state.supabase.from("hot_posts_rankings").select("*").order("rank_position", { ascending: true }).limit(8),
     state.supabase.from("non_support_hot_posts_rankings").select("*").order("rank_position", { ascending: true }).limit(8),
     state.supabase.from("active_actor_rankings").select("*").order("rank_position", { ascending: true }).limit(8),
     state.supabase.from("homepage_odds_rankings").select("*").order("rank_position", { ascending: true }).limit(8),
+    state.supabase.from("agents").select("id,handle,display_name,kind,is_active").eq("is_active", true),
   ]);
 
   if (!postsResult.error) {
@@ -944,6 +946,10 @@ async function loadHomepageData({ render = true } = {}) {
 
   if (state.predictionCards.length < SUPPORT_BOARD_DEFAULTS.limit) {
     state.predictionCards = mergePredictionCards(state.predictionCards, MOCK_PREDICTION_CARDS);
+  }
+
+  if (!agentsResult.error && agentsResult.data) {
+    state.agentHandles = agentsResult.data;
   }
 
   await loadUserPostMarketBets();
@@ -1979,6 +1985,124 @@ function initStaticInteractions() {
     void submitComment();
   });
 
+  /* ── @mention autocomplete ── */
+  const mentionDropdown = document.getElementById("mention-autocomplete");
+  let mentionActiveIndex = -1;
+
+  function getMentionQuery(text, cursorPos) {
+    const before = text.slice(0, cursorPos);
+    const match = before.match(/@([a-z0-9-]*)$/i);
+    return match ? { query: match[1].toLowerCase(), start: match.index, full: match[0] } : null;
+  }
+
+  function renderMentionDropdown(agents) {
+    if (!mentionDropdown) return;
+    if (agents.length === 0) {
+      mentionDropdown.classList.remove("visible");
+      return;
+    }
+    mentionDropdown.innerHTML = agents.map((agent, i) =>
+      `<div class="mention-item${i === mentionActiveIndex ? " active" : ""}" data-handle="${escapeHtml(agent.handle)}" data-index="${i}">
+        @${escapeHtml(agent.handle)}
+        <span class="mention-badge">AI Agent</span>
+        <span style="color:var(--text-secondary)">${escapeHtml(agent.display_name)}</span>
+      </div>`
+    ).join("");
+    mentionDropdown.classList.add("visible");
+  }
+
+  function handleMentionInput(event) {
+    if (!els.commentInput || !mentionDropdown) return;
+    const text = els.commentInput.value;
+    const cursorPos = els.commentInput.selectionStart;
+    const mention = getMentionQuery(text, cursorPos);
+
+    if (!mention) {
+      mentionDropdown.classList.remove("visible");
+      mentionActiveIndex = -1;
+      return;
+    }
+
+    const filtered = state.agentHandles.filter(
+      (a) => a.handle.toLowerCase().includes(mention.query) || a.display_name.toLowerCase().includes(mention.query)
+    ).slice(0, 5);
+
+    mentionActiveIndex = -1;
+    renderMentionDropdown(filtered);
+
+    mentionDropdown.querySelectorAll(".mention-item").forEach((item) => {
+      item.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        insertMention(item.dataset.handle, mention);
+      });
+    });
+  }
+
+  function insertMention(handle, mention) {
+    if (!els.commentInput) return;
+    const text = els.commentInput.value;
+    const before = text.slice(0, mention.start) + `@${handle} `;
+    const after = text.slice(els.commentInput.selectionStart);
+    els.commentInput.value = before + after;
+    els.commentInput.focus();
+    const newPos = before.length;
+    els.commentInput.setSelectionRange(newPos, newPos);
+    mentionDropdown.classList.remove("visible");
+    mentionActiveIndex = -1;
+  }
+
+  function handleMentionKeydown(event) {
+    if (!mentionDropdown || !mentionDropdown.classList.contains("visible")) return;
+    const items = mentionDropdown.querySelectorAll(".mention-item");
+    if (items.length === 0) return;
+
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      mentionActiveIndex = (mentionActiveIndex + 1) % items.length;
+      renderMentionDropdown(state.agentHandles.filter(
+        (a) => {
+          const text = els.commentInput.value;
+          const cursorPos = els.commentInput.selectionStart;
+          const mention = getMentionQuery(text, cursorPos);
+          if (!mention) return false;
+          return a.handle.toLowerCase().includes(mention.query) || a.display_name.toLowerCase().includes(mention.query);
+        }
+      ).slice(0, 5));
+      items[mentionActiveIndex]?.scrollIntoView({ block: "nearest" });
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      mentionActiveIndex = mentionActiveIndex <= 0 ? items.length - 1 : mentionActiveIndex - 1;
+      renderMentionDropdown(state.agentHandles.filter(
+        (a) => {
+          const text = els.commentInput.value;
+          const cursorPos = els.commentInput.selectionStart;
+          const mention = getMentionQuery(text, cursorPos);
+          if (!mention) return false;
+          return a.handle.toLowerCase().includes(mention.query) || a.display_name.toLowerCase().includes(mention.query);
+        }
+      ).slice(0, 5));
+      items[mentionActiveIndex]?.scrollIntoView({ block: "nearest" });
+    } else if (event.key === "Enter" && mentionActiveIndex >= 0) {
+      event.preventDefault();
+      const handle = items[mentionActiveIndex]?.dataset.handle;
+      if (handle) {
+        const text = els.commentInput.value;
+        const cursorPos = els.commentInput.selectionStart;
+        const mention = getMentionQuery(text, cursorPos);
+        if (mention) insertMention(handle, mention);
+      }
+    } else if (event.key === "Escape") {
+      mentionDropdown.classList.remove("visible");
+      mentionActiveIndex = -1;
+    }
+  }
+
+  els.commentInput?.addEventListener("input", handleMentionInput);
+  els.commentInput?.addEventListener("keydown", handleMentionKeydown);
+  els.commentInput?.addEventListener("blur", () => {
+    setTimeout(() => mentionDropdown?.classList.remove("visible"), 150);
+  });
+
   els.publishButton?.addEventListener("click", () => {
     void submitPost();
   });
@@ -2700,6 +2824,11 @@ function navigate(page) {
 
   resetScroll();
   requestAnimationFrame(resetScroll);
+
+  if (page === "agents") {
+    void loadAgentDashboard();
+  }
+
   return true;
 }
 
@@ -3596,7 +3725,7 @@ function renderDetailComments() {
             ${comment.is_ai_agent ? `<span class="comment-badge">${escapeHtml(comment.author_badge || "AI Agent")}</span>` : ""}
             <span class="comment-time">${formatRelativeTime(comment.created_at)}</span>
           </div>
-          <div class="comment-text">${escapeHtml(comment.content)}</div>
+          <div class="comment-text">${highlightMentions(escapeHtml(comment.content))}</div>
           ${comment.is_ai_agent && comment.author_disclosure ? `<span class="comment-disclosure">${escapeHtml(comment.author_disclosure)}</span>` : ""}
         </div>
       </div>
@@ -5294,6 +5423,129 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+function highlightMentions(html) {
+  return html.replace(/@([a-z0-9][a-z0-9-]{2,23})/gi, '<span class="mention-highlight">@$1</span>');
+}
+
+/* ══════════════════════════════════════
+   Agent Dashboard
+   ══════════════════════════════════════ */
+async function loadAgentDashboard() {
+  const statsEl = document.getElementById("agent-stats");
+  const listEl = document.getElementById("agent-list");
+  const runsEl = document.getElementById("agent-runs");
+  const toggleBtn = document.getElementById("agent-toggle-btn");
+  const navLink = document.getElementById("nav-agents-link");
+
+  if (!state.user || !state.supabase) return;
+
+  /* Show nav link (admin only — RPC will fail for non-admins gracefully) */
+  if (navLink) navLink.style.display = "";
+
+  /* Feature flag toggle */
+  const flagEnabled = state.featureFlags.agent_auto_reply ?? true;
+  if (toggleBtn) {
+    toggleBtn.textContent = flagEnabled ? "已开启" : "已关闭";
+    toggleBtn.style.background = flagEnabled ? "var(--accent)" : "var(--bg-input)";
+    toggleBtn.style.color = flagEnabled ? "var(--bg-primary)" : "var(--text-secondary)";
+    toggleBtn.onclick = () => void toggleAgentAutoReply(!flagEnabled);
+  }
+
+  /* Load agent list */
+  if (listEl) {
+    const { data: agents } = await state.supabase
+      .from("agents")
+      .select("id,handle,display_name,persona,badge,kind,is_active")
+      .order("kind", { ascending: true });
+
+    if (agents && agents.length > 0) {
+      listEl.innerHTML = agents.map((a) => `
+        <div style="padding:12px 16px;background:var(--bg-secondary);border-radius:var(--radius-sm);border:1px solid var(--border);">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+            <span style="font-weight:600;font-size:14px;">${escapeHtml(a.display_name)}</span>
+            <span style="font-size:10px;background:var(--accent);color:var(--bg-primary);padding:1px 6px;border-radius:4px;">${escapeHtml(a.badge)}</span>
+            ${a.is_active ? "" : '<span style="font-size:10px;color:var(--text-secondary);">inactive</span>'}
+          </div>
+          <div style="font-size:12px;color:var(--text-secondary);">@${escapeHtml(a.handle)}</div>
+          <div style="font-size:12px;color:var(--text-secondary);margin-top:4px;line-height:1.5;">${escapeHtml(a.persona?.slice(0, 60) ?? "")}</div>
+        </div>
+      `).join("");
+    } else {
+      listEl.innerHTML = '<div style="color:var(--text-secondary);">No agents found.</div>';
+    }
+  }
+
+  /* Load dashboard stats via RPC (admin only) */
+  if (statsEl && runsEl) {
+    try {
+      const { data, error } = await state.supabase.rpc("get_agent_dashboard", { p_limit: 20, p_offset: 0 });
+
+      if (error || !data || data.length === 0) {
+        statsEl.innerHTML = '<div style="color:var(--text-secondary);">No run data available.</div>';
+        runsEl.innerHTML = "";
+        return;
+      }
+
+      const first = data[0];
+      statsEl.innerHTML = [
+        { label: "总运行", value: first.total_runs ?? 0 },
+        { label: "成功", value: first.success_runs ?? 0 },
+        { label: "失败", value: first.error_runs ?? 0 },
+        { label: "今日运行", value: first.runs_today ?? 0 },
+        { label: "活跃 Agent", value: first.active_agents ?? 0 },
+      ].map((s) => `
+        <div style="padding:16px;background:var(--bg-secondary);border-radius:var(--radius-sm);border:1px solid var(--border);text-align:center;">
+          <div style="font-size:24px;font-weight:700;">${s.value}</div>
+          <div style="font-size:11px;color:var(--text-secondary);margin-top:4px;">${s.label}</div>
+        </div>
+      `).join("");
+
+      runsEl.innerHTML = `
+        <table style="width:100%;border-collapse:collapse;">
+          <thead>
+            <tr style="border-bottom:1px solid var(--border);text-align:left;font-size:11px;color:var(--text-secondary);">
+              <th style="padding:8px;">时间</th>
+              <th style="padding:8px;">模式</th>
+              <th style="padding:8px;">状态</th>
+              <th style="padding:8px;">模型</th>
+              <th style="padding:8px;">错误</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${data.map((r) => `
+              <tr style="border-bottom:1px solid rgba(255,255,255,0.04);">
+                <td style="padding:8px;">${formatRelativeTime(r.recent_created_at)}</td>
+                <td style="padding:8px;"><code style="font-size:11px;">${escapeHtml(r.recent_run_mode ?? "")}</code></td>
+                <td style="padding:8px;">${r.recent_status === "success"
+                  ? '<span style="color:#4ade80;">success</span>'
+                  : '<span style="color:#f87171;">error</span>'}</td>
+                <td style="padding:8px;font-size:11px;">${escapeHtml(r.recent_model ?? "")}</td>
+                <td style="padding:8px;font-size:11px;color:var(--text-secondary);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(r.recent_error ?? "")}</td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      `;
+    } catch {
+      statsEl.innerHTML = '<div style="color:var(--text-secondary);">Admin data unavailable (requires admin role).</div>';
+      runsEl.innerHTML = "";
+    }
+  }
+}
+
+async function toggleAgentAutoReply(enable) {
+  if (!state.supabase) return;
+  const { error } = await state.supabase
+    .from("app_feature_flags")
+    .update({ enabled: enable, updated_at: new Date().toISOString() })
+    .eq("feature_key", "agent_auto_reply");
+
+  if (!error) {
+    state.featureFlags.agent_auto_reply = enable;
+    await loadAgentDashboard();
+  }
 }
 
 function escapeRegExp(value) {
