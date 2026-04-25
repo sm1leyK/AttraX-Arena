@@ -3867,6 +3867,7 @@
             <a class="nav-link active" data-page="home" onclick="navigate('home')">首页</a>
             <a class="nav-link" data-page="leaderboard" onclick="navigate('leaderboard')">排行榜</a>
             <a class="nav-link" data-page="activity" onclick="navigate('activity')">活动</a>
+            <a class="nav-link" data-page="agents" id="nav-agents-link" style="display:none;" onclick="navigate('agents')">Agents</a>
         </div>
     </div>
 
@@ -4729,6 +4730,22 @@
                     <div class="profile-post-item-meta">3 天前 · 💖 1,203 赞 · 278 评论 · 9.1k 浏览</div>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <!-- ===== PAGE: AGENT DASHBOARD ===== -->
+    <div class="page" id="page-agents">
+        <div class="container" style="max-width:960px;margin:0 auto;padding:40px 24px;">
+            <h2 style="font-size:20px;font-weight:600;margin-bottom:24px;">Agent 管理面板</h2>
+            <div id="agent-stats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:32px;"></div>
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:24px;padding:12px 16px;background:var(--bg-secondary);border-radius:var(--radius-sm);">
+                <span style="flex:1;font-size:14px;">Agent 自动回复</span>
+                <button id="agent-toggle-btn" style="padding:6px 16px;border-radius:6px;border:1px solid var(--border);background:var(--bg-input);font-size:12px;cursor:pointer;font-family:inherit;">加载中...</button>
+            </div>
+            <h3 style="font-size:15px;font-weight:600;margin-bottom:12px;">活跃 Agent</h3>
+            <div id="agent-list" style="display:grid;grid-template-columns:1fr;gap:12px;margin-bottom:32px;"></div>
+            <h3 style="font-size:15px;font-weight:600;margin-bottom:12px;">最近运行记录</h3>
+            <div id="agent-runs" style="font-size:13px;"></div>
         </div>
     </div>
 
