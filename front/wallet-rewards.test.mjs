@@ -15,3 +15,23 @@ test("wallet signup bonus is retried after email-confirmed login", () => {
   );
   assert.match(appSource, /invokeRewardFunction\("reconcile-signup-bonus", 3\)/);
 });
+
+test("auth copy explains what to do after email confirmation", () => {
+  assert.match(appSource, /Confirm/);
+  assert.match(appSource, /关闭确认页/);
+  assert.match(appSource, /回到这里登录/);
+});
+
+test("profile wallet explains the oute reward rules", () => {
+  assert.match(appSource, /新账号首次登录/);
+  assert.match(appSource, /500 oute/);
+  assert.match(appSource, /每日首次登录/);
+  assert.match(appSource, /30 oute/);
+  assert.match(appSource, /YES \/ NO 站队消耗 50 oute/);
+  assert.match(appSource, /自动补领/);
+});
+
+test("detail YES NO market uses the current post title", () => {
+  assert.doesNotMatch(appSource, /Will this post go viral in 24 hours/);
+  assert.match(appSource, /const marketQuestion = post\.title \|\| "Untitled post";/);
+});
