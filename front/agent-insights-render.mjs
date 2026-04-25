@@ -23,6 +23,7 @@ export function renderLensAgentStrip(insight) {
 
 export function renderLensAgentDetailCard(insight) {
   const meterWidth = normalizePercent(insight?.meterWidth ?? insight?.supportRate ?? 50);
+  const sourceLabel = escapeHtml(insight?.sourceLabel || "本地信号");
 
   return `
     <div class="lens-agent-card" aria-label="Lens 小助手帖子分析">
@@ -32,9 +33,9 @@ export function renderLensAgentDetailCard(insight) {
         </div>
         <div>
           <div class="lens-agent-title">Lens 小助手</div>
-          <div class="lens-agent-subtitle">本地信号读取</div>
+          <div class="lens-agent-subtitle">${sourceLabel}</div>
         </div>
-        <span class="lens-agent-ai-chip">本地</span>
+        <span class="lens-agent-ai-chip">${sourceLabel}</span>
       </div>
       <div class="lens-agent-card-grid">
         <div class="lens-agent-metric">

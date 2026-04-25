@@ -53,6 +53,7 @@ export function buildLensAgentInsight(post = {}, { supportBoardSignal = null } =
     trend,
     trendLabel: toTrendLabel(trend),
     summary: buildSummary({ trend, participatesInSupportBoard }),
+    sourceLabel: "本地信号",
     meterWidth: clampNumber(supportRate, 6, 94),
   };
 }

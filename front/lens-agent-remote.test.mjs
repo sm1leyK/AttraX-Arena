@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  LENS_AGENT_DEFAULT_TIMEOUT_MS,
   buildLensAgentCacheKey,
   createLensAgentInsightClient,
   normalizeLensAgentInsight,
@@ -35,6 +36,10 @@ const fallbackInsight = Object.freeze({
   meterWidth: 50,
 });
 
+test("allows enough time for the deployed Lens Edge Function to call OpenAI", () => {
+  assert.ok(LENS_AGENT_DEFAULT_TIMEOUT_MS >= 20000);
+});
+
 test("builds the Lens cache key from post id and updated_at", () => {
   assert.equal(
     buildLensAgentCacheKey({
@@ -65,6 +70,7 @@ test("normalizes remote Lens JSON into the existing card contract", () => {
       riskLabel: "\u4e2d",
       confidenceLabel: "\u9ad8",
       summary: "Remote summary",
+      sourceLabel: "AI 分析",
       meterWidth: 74,
     },
   );

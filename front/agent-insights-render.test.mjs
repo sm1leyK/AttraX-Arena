@@ -35,10 +35,12 @@ test("renders a detail card with escaped summary copy", () => {
   const html = renderLensAgentDetailCard({
     ...insight,
     summary: "<script>alert(1)</script>",
+    sourceLabel: "AI 分析",
   });
 
   assert.match(html, /class="lens-agent-card"/);
   assert.match(html, /Lens 小助手/);
+  assert.match(html, /AI 分析/);
   assert.match(html, /支持率/);
   assert.match(html, /把握/);
   assert.match(html, /争议风险/);

@@ -1,5 +1,5 @@
 const STORAGE_PREFIX = "attrax:lens-agent-insight:";
-const DEFAULT_TIMEOUT_MS = 6000;
+export const LENS_AGENT_DEFAULT_TIMEOUT_MS = 25000;
 const DEFAULT_SUMMARY = "Lens is reading this post signal.";
 const DEFAULT_TREND_LABEL = "\u5b89\u9759";
 const DEFAULT_RISK_LABEL = "\u4f4e";
@@ -33,6 +33,7 @@ export function normalizeLensAgentInsight(value) {
     riskLabel: toCleanString(value.riskLabel) || DEFAULT_RISK_LABEL,
     confidenceLabel: toCleanString(value.confidenceLabel) || DEFAULT_CONFIDENCE_LABEL,
     summary: toCleanString(value.summary) || DEFAULT_SUMMARY,
+    sourceLabel: toCleanString(value.sourceLabel) || "AI 分析",
     meterWidth: supportRate,
   };
 }
@@ -41,7 +42,7 @@ export function createLensAgentInsightClient({
   supabase = null,
   storage,
   invokeAnalyzePost,
-  timeoutMs = DEFAULT_TIMEOUT_MS,
+  timeoutMs = LENS_AGENT_DEFAULT_TIMEOUT_MS,
 } = {}) {
   const resolvedStorage = resolveStorage(storage);
   const memoryCache = new Map();
