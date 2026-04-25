@@ -124,13 +124,15 @@ function drawNameTag(context, label) {
   context.fillText(text, x + 12, 236);
 }
 
-function drawDeskProp(context, avatar) {
+function drawDeskProp(context, avatar, mood = "idle", accent = "#7ba4db") {
+  const isActive = mood !== "idle";
+
   if (avatar.accessory === "monitor") {
     drawRect(context, 29, 138, 55, 36, "#2f3b5b");
-    drawRect(context, 33, 142, 47, 26, "#7fb8ff");
+    drawRect(context, 33, 142, 47, 26, isActive ? "#b9ecff" : "#7fb8ff");
     drawRect(context, 40, 170, 34, 6, "#1f2638");
     for (let i = 0; i < 5; i += 1) {
-      drawRect(context, 37 + i * 8, 146 + i * 2, 5, 4, "#c8eeff");
+      drawRect(context, 37 + i * 8, 146 + i * 2, 5, isActive ? 7 : 4, "#c8eeff");
     }
   }
 
@@ -140,16 +142,24 @@ function drawDeskProp(context, avatar) {
     drawRect(context, 91, 154, 70, 5, "#d9cfbf");
     drawRect(context, 89, 166, 78, 5, "#d9cfbf");
     drawRect(context, 94, 178, 58, 5, "#d9cfbf");
+    if (isActive) {
+      drawRect(context, 88, 187, 70, 5, accent);
+    }
   }
 
   if (avatar.accessory === "notes") {
     drawRect(context, 38, 134, 42, 32, "#ffe2a7");
     drawRect(context, 180, 67, 24, 31, "#7bc9ff");
     drawRect(context, 188, 106, 22, 18, "#ffe27a");
+    if (isActive) {
+      drawRect(context, 172, 99, 28, 8, accent);
+    }
   }
 }
 
-function drawFrontHuman(context, avatar) {
+function drawFrontHuman(context, avatar, mood = "idle") {
+  const isActive = mood !== "idle";
+
   drawRect(context, 78, 143, 100, 66, avatar.shadow);
   drawRect(context, 86, 134, 84, 76, avatar.shirt);
   drawRect(context, 112, 118, 32, 29, avatar.skin);
@@ -159,14 +169,19 @@ function drawFrontHuman(context, avatar) {
   drawRect(context, 168, 91, 22, 67, avatar.hairShade);
   drawRect(context, 91, 67, 70, 17, avatar.hair);
   drawRect(context, 119, 92, 56, 15, avatar.hairShade);
-  drawRect(context, 98, 119, 9, 25, "#4b2d2f");
-  drawRect(context, 151, 119, 9, 25, "#4b2d2f");
-  drawRect(context, 121, 145, 17, 6, "#c96f61");
+  drawRect(context, 98, isActive ? 116 : 119, isActive ? 11 : 9, isActive ? 27 : 25, "#4b2d2f");
+  drawRect(context, 151, isActive ? 116 : 119, isActive ? 11 : 9, isActive ? 27 : 25, "#4b2d2f");
+  if (isActive) {
+    drawRect(context, 101, 120, 4, 6, "#fff7ed");
+    drawRect(context, 154, 120, 4, 6, "#fff7ed");
+  }
+  drawRect(context, isActive ? 117 : 121, 145, isActive ? 25 : 17, isActive ? 7 : 6, "#c96f61");
   drawRect(context, 103, 71, 9, 7, "rgba(255,255,255,0.18)");
   drawRect(context, 134, 81, 36, 7, "rgba(255,255,255,0.14)");
 }
 
-function drawSideHuman(context, avatar) {
+function drawSideHuman(context, avatar, mood = "idle") {
+  const isActive = mood !== "idle";
   const isRight = avatar.view === "right";
   const faceX = isRight ? 92 : 91;
   const hairBackX = isRight ? 78 : 81;
@@ -182,8 +197,11 @@ function drawSideHuman(context, avatar) {
   drawRect(context, hairBackX, 72, 92, 37, avatar.hair);
   drawRect(context, isRight ? 75 : 77, 94, 28, 69, avatar.hairShade);
   drawRect(context, isRight ? 84 : 144, 91, 28, 19, avatar.hairShade);
-  drawRect(context, eyeX, 115, 8, 24, "#4b2d2f");
-  drawRect(context, mouthX, 147, 18, 5, "#b75f56");
+  drawRect(context, eyeX, isActive ? 112 : 115, isActive ? 10 : 8, isActive ? 28 : 24, "#4b2d2f");
+  if (isActive) {
+    drawRect(context, eyeX + 3, 116, 4, 6, "#fff7ed");
+  }
+  drawRect(context, mouthX, 147, isActive ? 22 : 18, isActive ? 6 : 5, "#b75f56");
   drawRect(context, isRight ? 117 : 102, 76, 42, 8, "rgba(255,255,255,0.16)");
 
   if (avatar.accessory === "glasses") {
@@ -194,7 +212,9 @@ function drawSideHuman(context, avatar) {
   }
 }
 
-function drawRobot(context, avatar) {
+function drawRobot(context, avatar, mood = "idle") {
+  const isActive = mood !== "idle";
+
   drawRect(context, 77, 144, 102, 66, avatar.shadow);
   drawRect(context, 88, 132, 80, 78, avatar.shirt);
   drawRect(context, 65, 92, 20, 54, "#59627b");
@@ -204,32 +224,32 @@ function drawRobot(context, avatar) {
   drawRect(context, 74, 84, 11, 28, "#d7dfed");
   drawRect(context, 171, 84, 11, 28, "#d7dfed");
   drawStrokeRect(context, 77, 69, 102, 88, "#6b7280", 5);
-  drawRect(context, 101, 111, 9, 23, "#8a2d3a");
-  drawRect(context, 148, 111, 9, 23, "#8a2d3a");
-  drawRect(context, 113, 150, 30, 7, "#cbd5e1");
+  drawRect(context, 101, isActive ? 107 : 111, isActive ? 12 : 9, isActive ? 27 : 23, isActive ? "#20d47b" : "#8a2d3a");
+  drawRect(context, 148, isActive ? 107 : 111, isActive ? 12 : 9, isActive ? 27 : 23, isActive ? "#20d47b" : "#8a2d3a");
+  drawRect(context, 113, 150, isActive ? 34 : 30, isActive ? 8 : 7, isActive ? "#94f5c2" : "#cbd5e1");
   drawRect(context, 94, 134, 69, 9, "#f1f5f9");
   drawRect(context, 56, 158, 26, 17, "#e5e7eb");
   drawRect(context, 174, 158, 26, 17, "#e5e7eb");
 }
 
-function drawPixelAvatar(context, workstation) {
+function drawPixelAvatar(context, workstation, mood = "idle") {
   const avatar = workstation.avatar ?? {};
-  drawDeskProp(context, avatar);
+  drawDeskProp(context, avatar, mood, workstation.accent);
 
   if (avatar.type === "robot") {
-    drawRobot(context, avatar);
+    drawRobot(context, avatar, mood);
     return;
   }
 
   if (avatar.view === "left" || avatar.view === "right") {
-    drawSideHuman(context, avatar);
+    drawSideHuman(context, avatar, mood);
     return;
   }
 
-  drawFrontHuman(context, avatar);
+  drawFrontHuman(context, avatar, mood);
 }
 
-function createPixelWindowTexture(THREE, workstation) {
+function createPixelWindowTexture(THREE, workstation, mood = "idle") {
   const canvas = document.createElement("canvas");
   canvas.width = PIXEL_CANVAS_SIZE;
   canvas.height = PIXEL_CANVAS_SIZE;
@@ -238,8 +258,8 @@ function createPixelWindowTexture(THREE, workstation) {
 
   context.clearRect(0, 0, canvas.width, canvas.height);
   drawWindowChrome(context, workstation.accent);
-  drawPixelAvatar(context, workstation);
-  drawSpeechBubble(context, workstation.activity ?? workstation.status);
+  drawPixelAvatar(context, workstation, mood);
+  drawSpeechBubble(context, mood === "idle" ? workstation.activity ?? workstation.status : workstation.hoverActivity ?? workstation.activity ?? workstation.status);
   drawNameTag(context, workstation.avatar?.label ?? workstation.name);
 
   return createCanvasTexture(THREE, canvas);
@@ -361,7 +381,10 @@ function buildRoom(THREE, scene) {
 
 function buildCharacter(THREE, workstation) {
   const group = new THREE.Group();
-  const panelTexture = createPixelWindowTexture(THREE, workstation);
+  const panelTextures = {
+    idle: createPixelWindowTexture(THREE, workstation, "idle"),
+    hover: createPixelWindowTexture(THREE, workstation, "hover"),
+  };
   const frameMaterial = createMaterial(THREE, 0x0b0d12, { roughness: 0.8, metalness: 0.18 });
   const accentMaterial = createMaterial(THREE, workstation.accent, {
     emissive: workstation.accent,
@@ -377,10 +400,16 @@ function buildCharacter(THREE, workstation) {
 
   const portrait = new THREE.Mesh(
     new THREE.PlaneGeometry(2.92, 2.92),
-    createBasicTextureMaterial(THREE, panelTexture),
+    createBasicTextureMaterial(THREE, panelTextures.idle),
   );
   portrait.position.set(0, 2.66, 0.64);
-  portrait.userData = { workstationId: workstation.id, interactive: true, type: "character" };
+  portrait.userData = {
+    workstationId: workstation.id,
+    interactive: true,
+    type: "character",
+    mood: "idle",
+    textures: panelTextures,
+  };
   group.add(portrait);
 
   const leftPost = new THREE.Mesh(new THREE.BoxGeometry(0.12, 1.18, 0.12), accentMaterial);
@@ -391,6 +420,13 @@ function buildCharacter(THREE, workstation) {
   const rightPost = leftPost.clone();
   rightPost.position.x = 1.05;
   group.add(rightPost);
+
+  group.userData = {
+    workstationId: workstation.id,
+    interactive: true,
+    type: "character",
+    mood: "idle",
+  };
 
   return group;
 }
@@ -468,7 +504,8 @@ function buildWorkstation(THREE, workstation) {
   const darkMaterial = createMaterial(THREE, 0x0f172a);
 
   const character = buildCharacter(THREE, workstation);
-  character.userData = { workstationId: workstation.id, interactive: true, type: "character" };
+  character.userData = { ...character.userData, workstationId: workstation.id, interactive: true, type: "character" };
+  root.userData.character = character;
   root.add(character);
 
   const deskTop = new THREE.Mesh(new THREE.BoxGeometry(2.85, 0.18, 1.22), deskMaterial);
@@ -529,9 +566,37 @@ function buildWorkstation(THREE, workstation) {
     }),
   );
   halo.position.set(0, 0.03, 1.05);
+  halo.userData = {
+    workstationId: workstation.id,
+    type: "halo",
+    baseOpacity: 0.24,
+    baseScale: 1,
+  };
+  root.userData.halo = halo;
   root.add(halo);
 
   return root;
+}
+
+function setStationMood(station, mood) {
+  if (!station || station.userData?.mood === mood) {
+    return;
+  }
+
+  station.userData.mood = mood;
+  station.traverse((child) => {
+    const textures = child.userData?.textures;
+    if (!textures) {
+      return;
+    }
+
+    const nextTexture = textures[mood] ?? textures.idle;
+    if (child.material?.map !== nextTexture) {
+      child.material.map = nextTexture;
+      child.material.needsUpdate = true;
+    }
+    child.userData.mood = mood;
+  });
 }
 
 function createRenderer(THREE, mount) {
@@ -562,9 +627,10 @@ function buildResponsiveFocus(THREE, mount, focusTarget) {
   return { position, target };
 }
 
-export function createSpaceScene({ THREE, OrbitControls, mount, workstations, selectedId, onSelect, onStatusChange }) {
+export function createSpaceScene({ THREE, OrbitControls, mount, workstations, selectedId, onSelect, onActivate, onStatusChange }) {
   const scene = new THREE.Scene();
   scene.fog = new THREE.Fog(0x0c1016, 20, 44);
+  const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ?? false;
 
   const renderer = createRenderer(THREE, mount);
   const camera = new THREE.PerspectiveCamera(43, (mount.clientWidth || 1) / Math.max(mount.clientHeight || 1, 1), 0.1, 200);
@@ -618,11 +684,15 @@ export function createSpaceScene({ THREE, OrbitControls, mount, workstations, se
   const pointer = new THREE.Vector2();
   let animationFrameId = 0;
   let currentSelectionId = selectedId;
+  let hoveredId = "";
   let destroyed = false;
   let focusTween = null;
 
   focusWorkstation(selectedId, false);
 
+  renderer.domElement.style.touchAction = "manipulation";
+  renderer.domElement.addEventListener("pointermove", handlePointerMove);
+  renderer.domElement.addEventListener("pointerleave", handlePointerLeave);
   renderer.domElement.addEventListener("pointerdown", handlePointerDown);
   window.addEventListener("resize", handleResize);
 
@@ -661,14 +731,41 @@ export function createSpaceScene({ THREE, OrbitControls, mount, workstations, se
   }
 
   function handlePointerDown(event) {
+    const workstationId = getPointerWorkstationId(event);
+    if (workstationId) {
+      setHoverWorkstation(workstationId);
+      focusWorkstation(workstationId, true);
+      onActivate?.(workstations.find((item) => item.id === workstationId) ?? null);
+    }
+  }
+
+  function handlePointerMove(event) {
+    setHoverWorkstation(getPointerWorkstationId(event));
+  }
+
+  function handlePointerLeave() {
+    setHoverWorkstation("");
+  }
+
+  function getPointerWorkstationId(event) {
     const rect = renderer.domElement.getBoundingClientRect();
     pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
     pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
     raycaster.setFromCamera(pointer, camera);
     const hit = raycaster.intersectObjects(clickableObjects, true)[0];
-    const workstationId = findInteractiveWorkstationId(hit?.object);
-    if (workstationId) {
-      focusWorkstation(workstationId, true);
+    return findInteractiveWorkstationId(hit?.object);
+  }
+
+  function setHoverWorkstation(workstationId) {
+    const nextId = workstationId && stationMap.has(workstationId) ? workstationId : "";
+    if (hoveredId === nextId) {
+      return;
+    }
+
+    hoveredId = nextId;
+    renderer.domElement.style.cursor = hoveredId ? "pointer" : "";
+    for (const [id, station] of stationMap.entries()) {
+      setStationMood(station, id === hoveredId ? "hover" : "idle");
     }
   }
 
@@ -712,13 +809,29 @@ export function createSpaceScene({ THREE, OrbitControls, mount, workstations, se
       }
     }
 
-    const selectedStation = stationMap.get(currentSelectionId);
-    if (selectedStation) {
-      selectedStation.children.forEach((child) => {
-        if (child.geometry?.type === "CylinderGeometry" && child.material?.emissive) {
-          child.material.emissiveIntensity = 0.28 + Math.sin(now / 320) * 0.08;
+    for (const [id, station] of stationMap.entries()) {
+      const isHovered = id === hoveredId;
+      const isSelected = id === currentSelectionId;
+      const character = station.userData?.character;
+      const halo = station.userData?.halo;
+      const targetLift = reduceMotion ? 0 : isHovered ? 0.16 + Math.sin(now / 180) * 0.025 : isSelected ? 0.035 : 0;
+      const targetScale = reduceMotion ? 1 : isHovered ? 1.045 : isSelected ? 1.015 : 1;
+
+      if (character) {
+        character.position.y += (targetLift - character.position.y) * 0.16;
+        const nextScale = character.scale.x + (targetScale - character.scale.x) * 0.14;
+        character.scale.setScalar(nextScale);
+      }
+
+      if (halo?.material) {
+        const pulse = Math.sin(now / (isHovered ? 210 : 320)) * (isHovered ? 0.08 : 0.04);
+        halo.material.opacity = isHovered ? 0.42 + pulse : isSelected ? 0.3 + pulse : 0.18;
+        if (halo.material.emissive) {
+          halo.material.emissiveIntensity = isHovered ? 0.52 + pulse : isSelected ? 0.34 + pulse : 0.2;
         }
-      });
+        const haloScale = isHovered ? 1.08 : isSelected ? 1.03 : 1;
+        halo.scale.set(haloScale, 1, haloScale);
+      }
     }
 
     controls.update();
@@ -728,12 +841,22 @@ export function createSpaceScene({ THREE, OrbitControls, mount, workstations, se
   function dispose() {
     destroyed = true;
     cancelAnimationFrame(animationFrameId);
+    renderer.domElement.removeEventListener("pointermove", handlePointerMove);
+    renderer.domElement.removeEventListener("pointerleave", handlePointerLeave);
     renderer.domElement.removeEventListener("pointerdown", handlePointerDown);
     window.removeEventListener("resize", handleResize);
     controls.dispose();
+    const disposedTextures = new Set();
     scene.traverse((node) => {
       if (node.material?.map) {
+        disposedTextures.add(node.material.map);
         node.material.map.dispose?.();
+      }
+      for (const texture of Object.values(node.userData?.textures ?? {})) {
+        if (!disposedTextures.has(texture)) {
+          texture.dispose?.();
+          disposedTextures.add(texture);
+        }
       }
       node.material?.dispose?.();
       node.geometry?.dispose?.();

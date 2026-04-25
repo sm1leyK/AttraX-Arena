@@ -643,6 +643,7 @@
 
         .space-panel,
         .space-detail-card,
+        .space-dialog-panel,
         .space-status {
             backdrop-filter: blur(18px) saturate(130%);
             -webkit-backdrop-filter: blur(18px) saturate(130%);
@@ -830,6 +831,116 @@
             color: rgba(201,255,219,0.88);
         }
 
+        .space-dialog {
+            position: absolute;
+            left: 50%;
+            bottom: 108px;
+            z-index: 4;
+            width: min(430px, calc(100vw - 56px));
+            opacity: 0;
+            pointer-events: none;
+            transform: translateX(-50%) translateY(8px) scale(0.98);
+            transition: opacity 180ms ease, transform 180ms ease;
+        }
+
+        .space-dialog.is-open {
+            opacity: 1;
+            pointer-events: auto;
+            transform: translateX(-50%) translateY(0) scale(1);
+        }
+
+        .space-dialog-panel {
+            position: relative;
+            overflow: hidden;
+            border-radius: 18px;
+            border: 1px solid rgba(255,255,255,0.12);
+            background: rgba(10,11,15,0.88);
+            padding: 16px 18px 18px;
+        }
+
+        .space-dialog-panel::before {
+            content: "";
+            position: absolute;
+            inset: 0 0 auto;
+            height: 3px;
+            background: var(--space-dialog-accent, #7ba4db);
+            opacity: 0.95;
+        }
+
+        .space-dialog-close {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            width: 44px;
+            height: 44px;
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 50%;
+            background: rgba(255,255,255,0.06);
+            color: rgba(255,255,255,0.78);
+            cursor: pointer;
+            font: 600 18px/1 var(--font-main);
+            transition: transform var(--transition), border-color var(--transition), color var(--transition);
+        }
+
+        .space-dialog-close:hover,
+        .space-dialog-close:focus-visible {
+            color: var(--text-primary);
+            border-color: rgba(255,255,255,0.24);
+            outline: none;
+            transform: scale(1.04);
+        }
+
+        .space-dialog-kicker {
+            color: var(--space-dialog-accent, #7ba4db);
+            font-size: 11px;
+            letter-spacing: 0;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+        }
+
+        .space-dialog-name {
+            padding-right: 52px;
+            font-size: 20px;
+            font-weight: 600;
+            line-height: 1.25;
+            margin-bottom: 4px;
+        }
+
+        .space-dialog-role {
+            color: rgba(255,255,255,0.58);
+            font-size: 12px;
+            margin-bottom: 12px;
+        }
+
+        .space-dialog-line {
+            color: rgba(255,255,255,0.84);
+            font-size: 14px;
+            line-height: 1.65;
+            margin-bottom: 12px;
+        }
+
+        .space-dialog-status {
+            display: inline-flex;
+            max-width: 100%;
+            border-radius: 999px;
+            border: 1px solid rgba(255,255,255,0.1);
+            background: rgba(255,255,255,0.05);
+            color: rgba(255,255,255,0.68);
+            font-size: 12px;
+            line-height: 1.4;
+            padding: 7px 10px;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .space-dialog {
+                transition: none;
+            }
+
+            .space-dialog-close {
+                transition: none;
+            }
+        }
+
         @media (max-width: 1024px) {
             .space-detail-card {
                 top: auto;
@@ -899,6 +1010,18 @@
                 justify-content: flex-start;
                 overflow-x: auto;
                 flex-wrap: nowrap;
+            }
+
+            .space-dialog {
+                left: 16px;
+                right: 16px;
+                bottom: 96px;
+                width: auto;
+                transform: translateY(10px) scale(0.98);
+            }
+
+            .space-dialog.is-open {
+                transform: translateY(0) scale(1);
             }
         }
 
@@ -5406,6 +5529,16 @@
                     </div>
                 </div>
             </aside>
+            <div class="space-dialog" id="spaceDialog" aria-hidden="true">
+                <div class="space-dialog-panel" role="dialog" aria-modal="false" aria-labelledby="spaceDialogName">
+                    <button class="space-dialog-close" id="spaceDialogClose" type="button" aria-label="关闭角色对话">×</button>
+                    <div class="space-dialog-kicker">Agent Voice</div>
+                    <div class="space-dialog-name" id="spaceDialogName">--</div>
+                    <div class="space-dialog-role" id="spaceDialogRole">--</div>
+                    <p class="space-dialog-line" id="spaceDialogLine">--</p>
+                    <div class="space-dialog-status" id="spaceDialogStatus">--</div>
+                </div>
+            </div>
             <div class="space-status" id="spaceStatus" data-tone="loading">空间加载中，请稍候...</div>
             <div class="space-selector-bar" id="spaceSelectorBar">
                 <button class="space-selector-btn is-active" type="button" data-space-target="trend-prophet">Trend Prophet</button>

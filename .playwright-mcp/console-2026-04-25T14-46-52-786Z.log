@@ -1,0 +1,19 @@
+[  146053ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://192.168.127.1:8765/#/space:0
+[  146092ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://192.168.127.1:8765/favicon.ico:0
+[  149439ms] [ERROR] Failed to load resource: the server responded with a status of 502 () @ https://zlpzdokcyztvuiujgffs.supabase.co/functions/v1/analyze-post:0
+[  150295ms] [ERROR] Failed to load resource: the server responded with a status of 502 () @ https://zlpzdokcyztvuiujgffs.supabase.co/functions/v1/analyze-post:0
+[  152017ms] [ERROR] Failed to load resource: the server responded with a status of 502 () @ https://zlpzdokcyztvuiujgffs.supabase.co/functions/v1/analyze-post:0
+[  153266ms] [ERROR] Failed to load resource: the server responded with a status of 502 () @ https://zlpzdokcyztvuiujgffs.supabase.co/functions/v1/analyze-post:0
+[  154182ms] [ERROR] Failed to load resource: the server responded with a status of 502 () @ https://zlpzdokcyztvuiujgffs.supabase.co/functions/v1/analyze-post:0
+[  155951ms] [ERROR] Failed to load resource: the server responded with a status of 502 () @ https://zlpzdokcyztvuiujgffs.supabase.co/functions/v1/analyze-post:0
+[  157955ms] [ERROR] Failed to load resource: the server responded with a status of 502 () @ https://zlpzdokcyztvuiujgffs.supabase.co/functions/v1/analyze-post:0
+[  159639ms] [ERROR] Failed to load resource: the server responded with a status of 502 () @ https://zlpzdokcyztvuiujgffs.supabase.co/functions/v1/analyze-post:0
+[  161040ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://192.168.127.1:8765/#/space:0
+[  164446ms] [ERROR] Failed to load resource: the server responded with a status of 502 () @ https://zlpzdokcyztvuiujgffs.supabase.co/functions/v1/analyze-post:0
+[  165708ms] [ERROR] Failed to load resource: the server responded with a status of 502 () @ https://zlpzdokcyztvuiujgffs.supabase.co/functions/v1/analyze-post:0
+[  166979ms] [ERROR] Failed to load resource: the server responded with a status of 502 () @ https://zlpzdokcyztvuiujgffs.supabase.co/functions/v1/analyze-post:0
+[  168273ms] [ERROR] Failed to load resource: the server responded with a status of 502 () @ https://zlpzdokcyztvuiujgffs.supabase.co/functions/v1/analyze-post:0
+[  170190ms] [ERROR] Failed to load resource: the server responded with a status of 502 () @ https://zlpzdokcyztvuiujgffs.supabase.co/functions/v1/analyze-post:0
+[  171715ms] [ERROR] Failed to load resource: the server responded with a status of 502 () @ https://zlpzdokcyztvuiujgffs.supabase.co/functions/v1/analyze-post:0
+[  173184ms] [ERROR] Failed to load resource: the server responded with a status of 502 () @ https://zlpzdokcyztvuiujgffs.supabase.co/functions/v1/analyze-post:0
+[  174797ms] [ERROR] Failed to load resource: the server responded with a status of 502 () @ https://zlpzdokcyztvuiujgffs.supabase.co/functions/v1/analyze-post:0

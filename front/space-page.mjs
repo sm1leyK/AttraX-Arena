@@ -11,6 +11,7 @@ const ORBIT_CONTROLS_URL = "https://esm.sh/three@0.165.0/examples/jsm/controls/O
 
 let sceneController = null;
 let selectorCleanup = null;
+let dialogCleanup = null;
 let loadToken = 0;
 
 export function getSpacePageElements(root = document) {
@@ -22,6 +23,12 @@ export function getSpacePageElements(root = document) {
     detailBoard: root.getElementById("spaceDetailBoard"),
     detailStatus: root.getElementById("spaceDetailStatus"),
     status: root.getElementById("spaceStatus"),
+    dialog: root.getElementById("spaceDialog"),
+    dialogName: root.getElementById("spaceDialogName"),
+    dialogRole: root.getElementById("spaceDialogRole"),
+    dialogLine: root.getElementById("spaceDialogLine"),
+    dialogStatus: root.getElementById("spaceDialogStatus"),
+    dialogClose: root.getElementById("spaceDialogClose"),
     selectorButtons: Array.from(root.querySelectorAll("[data-space-target]")),
   };
 }
@@ -35,6 +42,44 @@ export function renderSpaceDetail(elements, workstation) {
   if (elements.detailStatus) elements.detailStatus.textContent = detail.status;
   setActiveSpaceSelector(elements, detail.id);
   return detail;
+}
+
+export function buildSpaceDialogModel(workstation) {
+  const detail = buildSpaceDetailModel(workstation);
+  return {
+    id: detail.id,
+    name: detail.name,
+    role: detail.role,
+    line: workstation?.dialogue?.line ?? detail.summary,
+    status: workstation?.dialogue?.status ?? workstation?.activity ?? detail.status,
+    accent: workstation?.accent ?? "#7ba4db",
+  };
+}
+
+export function openSpaceDialog(elements, workstation) {
+  const model = buildSpaceDialogModel(workstation);
+  if (!elements.dialog) {
+    return model;
+  }
+
+  if (elements.dialogName) elements.dialogName.textContent = model.name;
+  if (elements.dialogRole) elements.dialogRole.textContent = model.role;
+  if (elements.dialogLine) elements.dialogLine.textContent = model.line;
+  if (elements.dialogStatus) elements.dialogStatus.textContent = model.status;
+  elements.dialog.dataset.spaceTarget = model.id;
+  elements.dialog.style.setProperty("--space-dialog-accent", model.accent);
+  elements.dialog.classList.add("is-open");
+  elements.dialog.setAttribute("aria-hidden", "false");
+  return model;
+}
+
+export function closeSpaceDialog(elements) {
+  if (!elements.dialog) {
+    return;
+  }
+
+  elements.dialog.classList.remove("is-open");
+  elements.dialog.setAttribute("aria-hidden", "true");
 }
 
 export function setSpaceStatus(elements, message, tone = "loading") {
@@ -63,6 +108,7 @@ function bindSpaceSelectors(elements) {
 
       renderSpaceDetail(elements, workstation);
       sceneController?.focusWorkstation?.(workstation.id, true);
+      openSpaceDialog(elements, workstation);
     };
 
     button.addEventListener("click", handleClick);
@@ -77,6 +123,32 @@ function bindSpaceSelectors(elements) {
   };
 }
 
+function bindSpaceDialog(elements) {
+  dialogCleanup?.();
+
+  const removers = [];
+  if (elements.dialogClose) {
+    const handleClose = () => closeSpaceDialog(elements);
+    elements.dialogClose.addEventListener("click", handleClose);
+    removers.push(() => elements.dialogClose.removeEventListener("click", handleClose));
+  }
+
+  const handleKeyDown = (event) => {
+    if (event.key === "Escape") {
+      closeSpaceDialog(elements);
+    }
+  };
+  document.addEventListener("keydown", handleKeyDown);
+  removers.push(() => document.removeEventListener("keydown", handleKeyDown));
+
+  dialogCleanup = () => {
+    for (const remove of removers) {
+      remove();
+    }
+    dialogCleanup = null;
+  };
+}
+
 export async function loadSpacePage() {
   const currentToken = ++loadToken;
   const elements = getSpacePageElements();
@@ -86,6 +158,8 @@ export async function loadSpacePage() {
 
   renderSpaceDetail(elements, buildInitialSelection(SPACE_WORKSTATIONS, DEFAULT_WORKSTATION_ID));
   bindSpaceSelectors(elements);
+  bindSpaceDialog(elements);
+  closeSpaceDialog(elements);
 
   if (sceneController) {
     setSpaceStatus(elements, "空间已就绪，点击头像窗口、工位或底部按钮即可查看详情。", "ready");
@@ -113,6 +187,11 @@ export async function loadSpacePage() {
       onSelect: (workstation) => {
         renderSpaceDetail(elements, findWorkstationById(SPACE_WORKSTATIONS, workstation?.id));
       },
+      onActivate: (workstation) => {
+        const selected = findWorkstationById(SPACE_WORKSTATIONS, workstation?.id);
+        renderSpaceDetail(elements, selected);
+        openSpaceDialog(elements, selected);
+      },
       onStatusChange: ({ tone, message }) => {
         setSpaceStatus(elements, message, tone);
       },
@@ -126,6 +205,8 @@ export async function loadSpacePage() {
 export function disposeSpacePage() {
   loadToken += 1;
   selectorCleanup?.();
+  dialogCleanup?.();
+  closeSpaceDialog(getSpacePageElements());
   sceneController?.dispose?.();
   sceneController = null;
 }
